@@ -127,14 +127,13 @@ fn find_conflict_file(dir: &std::path::Path, base: &str) -> Option<PathBuf> {
     })
 }
 
-fn git_in(repo: &std::path::Path, args: &[&str]) {
+fn bare_commit_count(env: &TestEnv) -> String {
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
-        .args(args)
-        .current_dir(repo)
+        .args(["rev-list", "--count", "HEAD"])
+        .current_dir(env.bare.path())
         .output()
         .unwrap();
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 #[test]
@@ -242,13 +241,10 @@ fn squash_recovery() {
         assert_eq!(c, 0, "{o}");
     }
 
-    // squash history (Task 13 stub: direct git force-push here)
-    let repo = env.dev_a.xsync().join("repo");
-    git_in(&repo, &["checkout", "--orphan", "xsync-squash"]);
-    git_in(&repo, &["add", "-A"]);
-    git_in(&repo, &["commit", "-m", "squash"]);
-    git_in(&repo, &["branch", "-M", "main"]);
-    git_in(&repo, &["push", "--force", "origin", "main"]);
+    // squash history into a single commit
+    let (c, o) = run(&env.dev_a, &["gc", "--squash"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(bare_commit_count(&env), "1", "history must be a single commit");
 
     // B pull auto-recovers from the rewritten history
     let (c, o) = run(&env.dev_b, &["pull"]);
@@ -256,6 +252,44 @@ fn squash_recovery() {
     assert_eq!(
         fs::read(env.dev_b.claude().join("settings.json")).unwrap(),
         b"{\"model\":\"v2\"}"
+    );
+}
+
+#[test]
+fn rekey_reencrypts_and_squashes_old_key_out() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // rekey on A with a new passphrase
+    let (c, o) = run_env(&env.dev_a, &["rekey"], &[("XSYNC_NEW_PASSPHRASE", "new-pass")]);
+    assert_eq!(c, 0, "rekey failed: {o}");
+
+    // old-key history is gone: single commit
+    assert_eq!(bare_commit_count(&env), "1");
+
+    // old passphrase must now fail closed
+    let (c, o) = run(&env.dev_b, &["status"]);
+    assert_eq!(c, 2, "old passphrase must fail: {o}");
+
+    // a fresh device with the NEW passphrase can init + pull
+    let dev_c = FakeDevice::new("linux");
+    fs::create_dir_all(dev_c.claude()).unwrap();
+    let (c, o) = run_env(
+        &dev_c,
+        &["init", "--remote", &env.bare_url(), "--device", "linux", "--passphrase-env", "XSYNC_PASSPHRASE"],
+        &[("XSYNC_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 0, "init with new passphrase failed: {o}");
+    let (c, o) = run_env(&dev_c, &["pull"], &[("XSYNC_PASSPHRASE", "new-pass")]);
+    assert_eq!(c, 0, "pull with new passphrase failed: {o}");
+    assert_eq!(
+        fs::read(dev_c.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"opus\"}"
     );
 }
 

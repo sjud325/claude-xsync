@@ -52,8 +52,8 @@ fn main() {
         Cmd::Push { dry_run, force } => cli::push::run_push(cli::push::PushOpts { dry_run, force }),
         Cmd::Pull { dry_run, force } => cli::pull::run_pull(cli::pull::PullOpts { dry_run, force }),
         Cmd::Status { offline } => cli::status::run_status(offline),
-        Cmd::Gc { .. } => Err(anyhow::anyhow!("gc is not implemented yet")),
-        Cmd::Rekey { .. } => Err(anyhow::anyhow!("rekey is not implemented yet")),
+        Cmd::Gc { squash } => cli::gc::run_gc(squash),
+        Cmd::Rekey { passphrase_env } => cli::rekey::run_rekey(passphrase_env),
     };
     match result {
         Ok(code) => std::process::exit(code),

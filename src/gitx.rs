@@ -87,6 +87,20 @@ impl Git {
         self.run(&["push", "--force", "origin", "main"]).map(|_| ())
     }
 
+    /// Rewrite all current content as a single orphan commit on main and
+    /// force-push it (gc --squash / rekey history purge).
+    pub fn squash_to_single_commit(&self, msg: &str) -> anyhow::Result<()> {
+        self.run(&["checkout", "--orphan", "xsync-squash"])?;
+        self.run(&["add", "-A"])?;
+        self.run(&[
+            "-c", "user.name=claude-xsync",
+            "-c", "user.email=xsync@localhost",
+            "commit", "-m", msg,
+        ])?;
+        self.run(&["branch", "-M", "main"])?;
+        self.push_force()
+    }
+
     /// fetch + merge --ff-only (falls back to reset for an unborn local branch).
     pub fn pull_ff(&self) -> anyhow::Result<()> {
         self.fetch()?;

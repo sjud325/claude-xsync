@@ -11,7 +11,8 @@ pub fn run_status(offline: bool) -> anyhow::Result<i32> {
     if !offline {
         git.fetch()?;
         if git.diverged()? {
-            println!("note: remote history was rewritten — run `claude-xsync pull` to realign");
+            println!("note: remote history was rewritten (gc/rekey) — realigning local mirror");
+            git.reset_hard_origin()?;
         } else {
             git.pull_ff()?;
         }

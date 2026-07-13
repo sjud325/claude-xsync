@@ -35,7 +35,6 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
 
     let repo = repo_dir();
     let git = Git::clone_or_open(&cfg.remote, &repo)?;
-    let keys = load_keys(&cfg, &repo)?;
     git.fetch()?;
     let mut re_anchor = false;
     if git.diverged()? {
@@ -46,6 +45,8 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
         git.pull_ff()?;
     }
 
+    // keys AFTER fetch/reset — a rekey may have replaced the salt
+    let keys = load_keys(&cfg, &repo)?;
     let mut summary = Summary::new();
     let Some(manifest) = read_manifest(&repo, &keys)? else {
         println!("remote is empty — nothing to pull");

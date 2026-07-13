@@ -1,7 +1,9 @@
 //! Command orchestration only — no transform/crypto logic lives here.
+pub mod gc;
 pub mod init;
 pub mod pull;
 pub mod push;
+pub mod rekey;
 pub mod status;
 
 use crate::config::Config;

@@ -1117,9 +1117,9 @@ fn squash_recovery() { /* A: gc --squash (Task 13 stub: direct git force-push he
 - `gc --squash`: `git checkout --orphan xsync-squash && git add -A && git commit && git branch -M main && push --force`. Prints reminder: "other device will auto-recover on next pull".
 - `rekey`: prompt new passphrase (env override for tests) → new salt written → re-derive → re-seal every object + manifest from local plaintext (re-run push pipeline with `--force-all`) → mandatory squash (old-key history removed) → force push.
 
-- [ ] **Step 1: Failing e2e tests** — squash: after 3 pushes, `gc --squash` → bare repo `git rev-list --count HEAD == 1`; dev_b pull recovers (replaces Task 12's stub). rekey: after rekey with new passphrase, old passphrase `status` fails exit 2, new passphrase pull on fresh device works, history count == 1.
-- [ ] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: gc --squash and rekey with mandatory history purge"`
+- [x] **Step 1: Failing e2e tests** — squash: after 3 pushes, `gc --squash` → bare repo `git rev-list --count HEAD == 1`; dev_b pull recovers (replaces Task 12's stub). rekey: after rekey with new passphrase, old passphrase `status` fails exit 2, new passphrase pull on fresh device works, history count == 1.
+- [x] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: gc --squash and rekey with mandatory history purge"`
 
 ---
 
