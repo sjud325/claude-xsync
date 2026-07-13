@@ -34,7 +34,7 @@
 **Interfaces:**
 - Produces: `PathMapper::new(home: &str, path_map: &BTreeMap<String,String>) -> Result<PathMapper, MapperError>`, `PathMapper { pub tokens: Vec<TokenMapping> }`, `TokenMapping { pub name: String, pub local: String, pub enc_local: String }`. Tokens sorted longest-`local`-first; `HOME` always present; `local` stored trailing-separator-trimmed, canonical case.
 
-- [ ] **Step 1: Scaffold**
+- [x] **Step 1: Scaffold**
 
 ```bash
 cd ~/workspace/claude-xsync && cargo init --name claude-xsync
@@ -78,7 +78,7 @@ pub mod mapper;
 fn main() { println!("claude-xsync"); }
 ```
 
-- [ ] **Step 2: Write failing tests** (in `src/mapper.rs` bottom)
+- [x] **Step 2: Write failing tests** (in `src/mapper.rs` bottom)
 
 ```rust
 #[cfg(test)]
@@ -121,9 +121,9 @@ mod tests {
 }
 ```
 
-- [ ] **Step 3: Run to verify fail** — `cargo test mapper` → FAIL (types undefined)
+- [x] **Step 3: Run to verify fail** — `cargo test mapper` → FAIL (types undefined)
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 ```rust
 use std::collections::BTreeMap;
@@ -183,8 +183,8 @@ impl PathMapper {
 }
 ```
 
-- [ ] **Step 5: Run tests pass** — `cargo test mapper` → 4 passed
-- [ ] **Step 6: Commit** — `git add -A && git commit -m "feat: scaffold + PathMapper with reserved-name validation"`
+- [x] **Step 5: Run tests pass** — `cargo test mapper` → 4 passed
+- [x] **Step 6: Commit** — `git add -A && git commit -m "feat: scaffold + PathMapper with reserved-name validation"`
 
 ---
 
