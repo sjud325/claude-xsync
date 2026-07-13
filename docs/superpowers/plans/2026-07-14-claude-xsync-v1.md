@@ -390,7 +390,7 @@ pub fn resolve_text(input: &str, m: &PathMapper, mode: ResolveMode) -> String
 ```
 - Semantics: `normalize_text` (1) escapes literal `${`→`${ESC}`, (2) case-insensitively finds each token's `local` (both `\` and `/` separator variants for drive-letter locals) with boundary check (next char not in path-run charset ⇒ exact-home also matches), (3) captures the following path-run, (4) replaces with `${NAME}` + run with separators normalized to `/`, recording the original span text in order. `Verify` mode re-splices recorded originals per token occurrence (in order); `Pull` mode substitutes canonical local with `/` separators and converts run separators to `/`; both then unescape `${ESC}`→`${` last.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```rust
 #[cfg(test)]
@@ -495,8 +495,8 @@ mod prop {
 }
 ```
 
-- [ ] **Step 2: Run fail** — `cargo test pathmatch` → FAIL
-- [ ] **Step 3: Implement**
+- [x] **Step 2: Run fail** — `cargo test pathmatch` → FAIL
+- [x] **Step 3: Implement**
 
 ```rust
 use crate::mapper::PathMapper;
@@ -611,8 +611,8 @@ pub fn resolve_text(input: &str, m: &PathMapper, mode: ResolveMode) -> String {
 }
 ```
 
-- [ ] **Step 4: Run pass** — `cargo test pathmatch` → all pass (fix the implementation, never weaken a test; if a proptest case fails, minimize and add as a named regression test)
-- [ ] **Step 5: Commit** — `git commit -am "feat: path matcher with injective escaping and dual resolve"`
+- [x] **Step 4: Run pass** — `cargo test pathmatch` → all pass (fix the implementation, never weaken a test; if a proptest case fails, minimize and add as a named regression test)
+- [x] **Step 5: Commit** — `git commit -am "feat: path matcher with injective escaping and dual resolve"`
 
 ---
 
