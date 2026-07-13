@@ -1036,7 +1036,7 @@ fn run(dev: &FakeDevice, args: &[&str]) -> (i32, String) // spawns target/debug/
 - `init` flow: prompt-free flags for tests (`--remote <url> --device <name> --passphrase-env XSYNC_PASSPHRASE`): clone-or-init repo, create/read `salt`, derive keys, write config, if remote has manifest → verify decrypt (wrong passphrase = exit 2).
 - `push` flow implements spec §7 push 1–5 exactly: procguard → guard A (`remote_head` newer && `manifest.last_push_device != cfg.device` ⇒ exit 2 with "pull first" unless --force) → scan (+unknown warnings) → per file: hash-skip → `push_gate` → seal → chunk write under `objects/` → synthetic files (mcp extract, plugins manifests) through same pipeline → manifest update+seal → commit+push → state upsert per file. Deletions: state keys missing from scan ⇒ drop from manifest. Summary line + exit code per spec §8.
 
-- [ ] **Step 1: Failing e2e test**
+- [x] **Step 1: Failing e2e test**
 
 ```rust
 #[test]
@@ -1056,10 +1056,10 @@ fn init_and_first_push_populates_remote() {
 fn guard_a_blocks_out_of_order_push() { /* dev_b pushes first; dev_a push → exit 2, message contains "pull" */ }
 ```
 
-- [ ] **Step 2: Run fail** — `cargo test --test e2e` → FAIL
-- [ ] **Step 3: Implement** init.rs + push.rs per Interfaces (wire modules; no new logic beyond orchestration)
-- [ ] **Step 4: Run pass** — `cargo test --test e2e`
-- [ ] **Step 5: Commit** — `git commit -am "feat: init and push pipeline with guard A"`
+- [x] **Step 2: Run fail** — `cargo test --test e2e` → FAIL
+- [x] **Step 3: Implement** init.rs + push.rs per Interfaces (wire modules; no new logic beyond orchestration)
+- [x] **Step 4: Run pass** — `cargo test --test e2e`
+- [x] **Step 5: Commit** — `git commit -am "feat: init and push pipeline with guard A"`
 
 ---
 
@@ -1175,6 +1175,7 @@ Not tasks — a manual gate before calling v1 done, run on the actual Loki machi
 
 - **Task 2 test literal**: the plan's `handles_escapes_and_unicode` test used `br#"...한글..."#` — Rust forbids non-ASCII in raw *byte* string literals (compile error). Replaced with the byte-identical `r#"..."#.as_bytes()`. Semantics unchanged.
 - **Task 6 age Identity construction**: age 0.10 has no public raw-scalar constructor (`Identity` only offers `generate()` and bech32 `FromStr`; verified in crate source). Added the `bech32 = "0.9"` dependency (already in age's own tree) to encode the clamped scalar as `age-secret-key-…` and parse it. Derivation itself is exactly as planned (Argon2id 64B split).
+- **Task 11 deps/config**: added `getrandom = "0.2"` (already in age's tree) — the plan's dependency list had no RNG for the random 32-byte salt. Added `Config.passphrase_env: Option<String>` (serde-default) so non-interactive commands know which env var carries the passphrase; the plan's `--passphrase-env` init flag implies persisting it.
 - **Task 2 proptest oracle**: reproduced failure `minimal failing input: k = "z"`. `json!({k: v, "z": [...]})` collapses to one key when `k == "z"`, so the hardcoded expectation `[k, v, "z", v]` contradicts the oracle's own statement ("the strings serde sees"). Fixed with `prop_assume!(k != "z")` (degenerate-input exclusion, not a weakening — the lexer output was correct). Additionally, default `serde_json` sorts keys (BTreeMap), breaking the expected document order whenever `k > "z"`; enabled the `preserve_order` feature at Task 2 instead of Task 10 (Task 10 mandates it anyway).
 
 ### Deviation from spec
