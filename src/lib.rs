@@ -1,5 +1,8 @@
 pub mod config;
 pub mod crypto;
+pub mod fsx;
+pub mod gitx;
+pub mod procguard;
 pub mod manifest;
 pub mod mapper;
 pub mod scan;

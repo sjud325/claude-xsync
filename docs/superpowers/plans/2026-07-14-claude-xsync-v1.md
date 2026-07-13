@@ -978,9 +978,9 @@ pub fn claude_running(claude_dir: &Path) -> Vec<u32>  // sessions/*.json → pid
 ```
 - gitx errors must include git's stderr verbatim in the anyhow context.
 
-- [ ] **Step 1: Failing tests** — gitx integration test in `tests/gitx.rs`: create `tempdir` bare repo (`git init --bare`), `clone_or_open`, write file, `commit_all`, `push`, second clone sees it; simulate force-push then assert `diverged()==true` and `reset_hard_origin()` recovers. fsx: atomic_write to nested missing dirs; backup copies only existing files. procguard: fabricated sessions dir with own `std::process::id()` → detected; pid 999999 → not.
-- [ ] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass** — `cargo test --test gitx fsx procguard`
-- [ ] **Step 5: Commit** — `git commit -am "feat: git shell-out, atomic fs, running-instance guard"`
+- [x] **Step 1: Failing tests** — gitx integration test in `tests/gitx.rs`: create `tempdir` bare repo (`git init --bare`), `clone_or_open`, write file, `commit_all`, `push`, second clone sees it; simulate force-push then assert `diverged()==true` and `reset_hard_origin()` recovers. fsx: atomic_write to nested missing dirs; backup copies only existing files. procguard: fabricated sessions dir with own `std::process::id()` → detected; pid 999999 → not.
+- [x] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass** — `cargo test --test gitx fsx procguard`
+- [x] **Step 5: Commit** — `git commit -am "feat: git shell-out, atomic fs, running-instance guard"`
 
 ---
 
