@@ -624,7 +624,7 @@ pub fn resolve_text(input: &str, m: &PathMapper, mode: ResolveMode) -> String {
 **Interfaces:**
 - Produces: `key_to_portable(seg: &str, m: &PathMapper) -> String`, `portable_to_key(seg: &str, m: &PathMapper) -> Result<String, UnmappedToken>`, `pub struct UnmappedToken(pub String)`. Uses `mapper::encode_claude_path`. Boundary rule: `seg == enc_local || seg.starts_with(&(enc_local + "-"))`, case-insensitive compare, matched prefix replaced by `${NAME}`.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```rust
 #[cfg(test)]
@@ -666,8 +666,8 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run fail** → FAIL
-- [ ] **Step 3: Implement**
+- [x] **Step 2: Run fail** → FAIL
+- [x] **Step 3: Implement**
 
 ```rust
 use crate::mapper::PathMapper;
@@ -705,7 +705,7 @@ pub fn portable_to_key(seg: &str, m: &PathMapper) -> Result<String, UnmappedToke
 }
 ```
 
-- [ ] **Step 4: Run pass**, **Step 5: Commit** — `git commit -am "feat: dirkey portable mapping with boundary rule"`
+- [x] **Step 4: Run pass**, **Step 5: Commit** — `git commit -am "feat: dirkey portable mapping with boundary rule"`
 
 ---
 
