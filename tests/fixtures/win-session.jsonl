@@ -1,0 +1,6 @@
+{"_xsync_fixture":"synthetic-until-real-capture"}
+{"cwd":"C:\\Users\\Loki\\workspace\\claude-xsync","type":"user","message":"escaped backslash cwd"}
+{"trackedFileBackups":{"C:\\Users\\Loki\\workspace\\claude-xsync\\src\\main.rs":"h1","C:/Users/Loki/workspace/claude-xsync/README.md":"h2"}}
+{"cwd":"C:/Users/loki/문서/메모","note":"mixed slash form, lowercase drive user, korean path"}
+{"type":"assistant","text":"run `echo ${HOME}/bin` and a literal ${ESC} token in a bash discussion"}
+{"cwd":"C:\\Users\\Loki\\ws","tru

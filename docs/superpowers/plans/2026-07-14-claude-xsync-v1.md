@@ -1133,10 +1133,10 @@ fn squash_recovery() { /* A: gc --squash (Task 13 stub: direct git force-push he
 - Fixture provenance: mac fixture = mask a real short session from `~/.claude/projects/` NOW; win fixture = **collect from Loki machine at implementation start** (spec §9.2 — do not defer to release time). Until the real Windows capture lands, generate a synthetic win-session.jsonl by hand covering: `C:\\Users\\Loki\\...` cwd, `trackedFileBackups` path keys, `C:/Users/Loki` mixed form, Korean path, `${HOME}` literal in a bash string, truncated last line. Mark with leading comment line `{"_xsync_fixture":"synthetic-until-real-capture"}` and replace when real capture arrives.
 - `tests/golden.rs`: snapshot both directions — normalize(mac fixture, mac mapper) → assert full output equals committed `tests/fixtures/mac-session.portable.jsonl`; then resolve with win mapper → equals committed `mac-session.on-win.jsonl`. Same for win fixture. Regenerate committed outputs via `UPDATE_GOLDEN=1 cargo test golden` guard.
 
-- [ ] **Step 1: Write masking script + produce fixtures** (run script on a real session; hand-write synthetic win fixture)
-- [ ] **Step 2: Write golden test, run with `UPDATE_GOLDEN=1`** to mint snapshots, inspect them manually for correctness (cwd tokenized, literals escaped, Korean preserved)
-- [ ] **Step 3: Run without env** — `cargo test --test golden` → pass
-- [ ] **Step 4: Commit** — `git commit -am "test: golden cross-OS fixtures with masking script"`
+- [x] **Step 1: Write masking script + produce fixtures** (run script on a real session; hand-write synthetic win fixture)
+- [x] **Step 2: Write golden test, run with `UPDATE_GOLDEN=1`** to mint snapshots, inspect them manually for correctness (cwd tokenized, literals escaped, Korean preserved)
+- [x] **Step 3: Run without env** — `cargo test --test golden` → pass
+- [x] **Step 4: Commit** — `git commit -am "test: golden cross-OS fixtures with masking script"`
 
 ---
 
