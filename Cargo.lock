@@ -307,6 +307,7 @@ dependencies = [
  "age",
  "anyhow",
  "argon2",
+ "bech32",
  "clap",
  "dirs",
  "flate2",

@@ -830,7 +830,7 @@ fn transform_line(line: &[u8], m: &PathMapper) -> Result<(Vec<u8>, Vec<SpanRecor
 **Interfaces:**
 - Produces: `derive(passphrase: &str, salt: &[u8; 32]) -> Keys` where `Keys { identity: age::x25519::Identity, recipient: age::x25519::Recipient, hmac_key: [u8; 32] }` (Argon2id m=65536,t=3,p=1 → 64 bytes: first 32 clamped → x25519 scalar, last 32 = hmac_key); `seal(plain: &[u8], r: &Recipient) -> Vec<u8>` (gzip level 6 then age); `open(sealed: &[u8], id: &Identity) -> anyhow::Result<Vec<u8>>`; `object_name(hmac_key: &[u8;32], portable_path: &str) -> String` (hex HMAC-SHA256).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```rust
 #[test]
@@ -870,8 +870,8 @@ fn object_names_stable_and_keyed() {
 }
 ```
 
-- [ ] **Step 2: Run fail**, **Step 3: Implement** (age scryptless x25519 path: clamp bytes per RFC 7748: `b[0] &= 248; b[31] &= 127; b[31] |= 64;` then `age::x25519::Identity` from `StaticSecret`; gzip via `flate2::write::GzEncoder`), **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: passphrase-derived age crypto with HMAC object naming"`
+- [x] **Step 2: Run fail**, **Step 3: Implement** (age scryptless x25519 path: clamp bytes per RFC 7748: `b[0] &= 248; b[31] &= 127; b[31] |= 64;` then `age::x25519::Identity` from `StaticSecret`; gzip via `flate2::write::GzEncoder`), **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: passphrase-derived age crypto with HMAC object naming"`
 
 ---
 
@@ -1174,6 +1174,7 @@ Not tasks — a manual gate before calling v1 done, run on the actual Loki machi
 ### Deviations from plan discovered during implementation
 
 - **Task 2 test literal**: the plan's `handles_escapes_and_unicode` test used `br#"...한글..."#` — Rust forbids non-ASCII in raw *byte* string literals (compile error). Replaced with the byte-identical `r#"..."#.as_bytes()`. Semantics unchanged.
+- **Task 6 age Identity construction**: age 0.10 has no public raw-scalar constructor (`Identity` only offers `generate()` and bech32 `FromStr`; verified in crate source). Added the `bech32 = "0.9"` dependency (already in age's own tree) to encode the clamped scalar as `age-secret-key-…` and parse it. Derivation itself is exactly as planned (Argon2id 64B split).
 - **Task 2 proptest oracle**: reproduced failure `minimal failing input: k = "z"`. `json!({k: v, "z": [...]})` collapses to one key when `k == "z"`, so the hardcoded expectation `[k, v, "z", v]` contradicts the oracle's own statement ("the strings serde sees"). Fixed with `prop_assume!(k != "z")` (degenerate-input exclusion, not a weakening — the lexer output was correct). Additionally, default `serde_json` sorts keys (BTreeMap), breaking the expected document order whenever `k > "z"`; enabled the `preserve_order` feature at Task 2 instead of Task 10 (Task 10 mandates it anyway).
 
 ### Deviation from spec
