@@ -52,12 +52,18 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     }
 
     let mut summary = Summary::new();
-    let mut entries = manifest.as_ref().map(|m| m.entries.clone()).unwrap_or_default();
+    let mut entries = manifest
+        .as_ref()
+        .map(|m| m.entries.clone())
+        .unwrap_or_default();
     let mut pending_state: Vec<(String, String)> = Vec::new();
 
     for (portable, lf) in &locals {
         let unchanged = st.files.get(portable) == Some(&lf.portable_hash)
-            && entries.get(portable).map(|e| e.plaintext_hash == lf.portable_hash).unwrap_or(false);
+            && entries
+                .get(portable)
+                .map(|e| e.plaintext_hash == lf.portable_hash)
+                .unwrap_or(false);
         if unchanged {
             continue; // age is non-deterministic; the portable-payload hash is the identity
         }
@@ -93,8 +99,12 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     }
 
     // Deletions: previously-synced portables that vanished locally
-    let deletions: Vec<String> =
-        st.files.keys().filter(|p| !locals.contains_key(*p)).cloned().collect();
+    let deletions: Vec<String> = st
+        .files
+        .keys()
+        .filter(|p| !locals.contains_key(*p))
+        .cloned()
+        .collect();
     if !opts.dry_run {
         for portable in &deletions {
             if let Some(entry) = entries.remove(portable) {
@@ -142,7 +152,9 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
 /// Drop every `objects/<object>.age*` file (stale chunk cleanup before rewrite).
 fn remove_object_files(repo: &std::path::Path, object: &str) -> anyhow::Result<()> {
     let dir = repo.join("objects");
-    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(()) };
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
     let prefix = format!("{object}.age");
     for entry in rd.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();

@@ -71,6 +71,9 @@ mod tests {
         let remote = b"{\"a\":1}\n";
         let local = b"{\"b\":2}\n{\"partial";
         let merged = union_jsonl(local, remote);
-        assert_eq!(String::from_utf8(merged).unwrap(), "{\"a\":1}\n{\"b\":2}\n{\"partial");
+        assert_eq!(
+            String::from_utf8(merged).unwrap(),
+            "{\"a\":1}\n{\"b\":2}\n{\"partial"
+        );
     }
 }

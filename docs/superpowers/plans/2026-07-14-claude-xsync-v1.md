@@ -1150,10 +1150,10 @@ fn squash_recovery() { /* A: gc --squash (Task 13 stub: direct git force-push he
 - `release.yml`: on tag `v*` — build 6 targets (`aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-pc-windows-msvc`, `aarch64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`), upload ALL to the GitHub Release, then **verification job**: `gh release view --json assets` → fail the workflow if asset count < 7 (6 binaries + checksums.txt). This step is non-negotiable (spec §9 — the tawanorg lesson).
 - `README.md`: what/why (cross-OS path correctness — cite the two prior tools' gaps using spec §1's corrected wording), quickstart (init/push/pull), limitations section copied from spec §10, credits to tawanorg/claude-sync and claude-context-sync. `LICENSE`: MIT, copyright 2026 (repo owner name).
 
-- [ ] **Step 1: Write both workflows + README + LICENSE**
-- [ ] **Step 2: Verify locally** — `cargo fmt --check && cargo clippy -- -D warnings && cargo test` all green
-- [ ] **Step 3: Commit** — `git commit -am "chore: CI matrix, release workflow with asset-count gate, README, MIT license"`
-- [ ] **Step 4: Push to GitHub (user creates repo), tag `v0.1.0-alpha`, watch release workflow produce 6 binaries**
+- [x] **Step 1: Write both workflows + README + LICENSE**
+- [x] **Step 2: Verify locally** — `cargo fmt --check && cargo clippy -- -D warnings && cargo test` all green
+- [x] **Step 3: Commit** — `git commit -am "chore: CI matrix, release workflow with asset-count gate, README, MIT license"`
+- [x] **Step 4: Push to GitHub (user creates repo), tag `v0.1.0-alpha`, watch release workflow produce 6 binaries** — SKIPPED per instructions (user action; exact commands documented in README "Releasing" section; no remote push / repo creation / tagging performed by the agent)
 
 ---
 

@@ -2,13 +2,42 @@ use crate::config::Config;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-pub const ALLOWLIST: &[&str] = &["projects", "history.jsonl", "file-history", "tasks", "todos",
-    "plans", "settings.json", "settings.local.json", "CLAUDE.md", "keybindings.json",
-    "agents", "skills", "commands", "rules", "workflows"];
+pub const ALLOWLIST: &[&str] = &[
+    "projects",
+    "history.jsonl",
+    "file-history",
+    "tasks",
+    "todos",
+    "plans",
+    "settings.json",
+    "settings.local.json",
+    "CLAUDE.md",
+    "keybindings.json",
+    "agents",
+    "skills",
+    "commands",
+    "rules",
+    "workflows",
+];
 
-pub const EXCLUDED: &[&str] = &["ide", "session-env", "sessions", "shell-snapshots", "chrome",
-    "cache", "paste-cache", "debug", "downloads", "backups", "channels",
-    "stats-cache.json", "mcp-needs-auth-cache.json", ".credentials.json", "plugins", ".claude.json"];
+pub const EXCLUDED: &[&str] = &[
+    "ide",
+    "session-env",
+    "sessions",
+    "shell-snapshots",
+    "chrome",
+    "cache",
+    "paste-cache",
+    "debug",
+    "downloads",
+    "backups",
+    "channels",
+    "stats-cache.json",
+    "mcp-needs-auth-cache.json",
+    ".credentials.json",
+    "plugins",
+    ".claude.json",
+];
 
 pub struct ScanResult {
     pub files: Vec<(String /*rel*/, PathBuf)>,
@@ -31,7 +60,8 @@ pub fn scan(claude_dir: &Path, cfg: &Config) -> anyhow::Result<ScanResult> {
             continue;
         }
         let removed = cfg.removed_paths.contains(&name);
-        let allowed = (ALLOWLIST.contains(&name.as_str()) || cfg.extra_paths.contains(&name)) && !removed;
+        let allowed =
+            (ALLOWLIST.contains(&name.as_str()) || cfg.extra_paths.contains(&name)) && !removed;
         if allowed {
             if ft.is_dir() {
                 walk(&entry.path(), &name, &mut files)?;

@@ -15,7 +15,10 @@ pub struct FakeDevice {
 
 impl FakeDevice {
     fn new(name: &'static str) -> FakeDevice {
-        FakeDevice { home: TempDir::new().unwrap(), name }
+        FakeDevice {
+            home: TempDir::new().unwrap(),
+            name,
+        }
     }
     pub fn home_str(&self) -> String {
         self.home.path().to_string_lossy().to_string()
@@ -42,6 +45,7 @@ pub struct TestEnv {
 }
 
 impl TestEnv {
+    #[allow(clippy::new_without_default)] // test harness, Default is meaningless
     pub fn new() -> TestEnv {
         let bare = TempDir::new().unwrap();
         let out = Command::new("git")
@@ -49,25 +53,46 @@ impl TestEnv {
             .current_dir(bare.path())
             .output()
             .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         let dev_a = FakeDevice::new("mac");
         let dev_b = FakeDevice::new("win");
 
         // dev_a: one session with a cwd line + settings.json
-        let proj = dev_a.claude().join(format!("projects/{}-ws-app", dev_a.enc_home()));
+        let proj = dev_a
+            .claude()
+            .join(format!("projects/{}-ws-app", dev_a.enc_home()));
         fs::create_dir_all(&proj).unwrap();
         fs::write(
             proj.join("s.jsonl"),
-            format!("{{\"cwd\":\"{}/ws/app\",\"type\":\"user\"}}\n", dev_a.home_str()),
+            format!(
+                "{{\"cwd\":\"{}/ws/app\",\"type\":\"user\"}}\n",
+                dev_a.home_str()
+            ),
         )
         .unwrap();
-        fs::write(dev_a.claude().join("settings.json"), b"{\"model\":\"opus\"}").unwrap();
-        fs::write(dev_a.claude().join("history.jsonl"), b"{\"display\":\"cmd-a\"}\n").unwrap();
+        fs::write(
+            dev_a.claude().join("settings.json"),
+            b"{\"model\":\"opus\"}",
+        )
+        .unwrap();
+        fs::write(
+            dev_a.claude().join("history.jsonl"),
+            b"{\"display\":\"cmd-a\"}\n",
+        )
+        .unwrap();
 
         // dev_b: different settings
         fs::create_dir_all(dev_b.claude()).unwrap();
-        fs::write(dev_b.claude().join("settings.json"), b"{\"model\":\"sonnet\"}").unwrap();
+        fs::write(
+            dev_b.claude().join("settings.json"),
+            b"{\"model\":\"sonnet\"}",
+        )
+        .unwrap();
 
         TestEnv { bare, dev_a, dev_b }
     }
@@ -77,12 +102,18 @@ impl TestEnv {
     }
 
     pub fn init(&self, dev: &FakeDevice) -> (i32, String) {
-        run(dev, &[
-            "init",
-            "--remote", &self.bare_url(),
-            "--device", dev.name,
-            "--passphrase-env", "XSYNC_PASSPHRASE",
-        ])
+        run(
+            dev,
+            &[
+                "init",
+                "--remote",
+                &self.bare_url(),
+                "--device",
+                dev.name,
+                "--passphrase-env",
+                "XSYNC_PASSPHRASE",
+            ],
+        )
     }
 }
 
@@ -117,13 +148,17 @@ fn init_and_first_push_populates_remote() {
     // second push = no-op (hash skip)
     let (code2, out2) = run(&env.dev_a, &["push"]);
     assert_eq!(code2, 0, "second push failed: {out2}");
-    assert!(out2.contains("✓ 0 synced"), "expected no-op summary: {out2}");
+    assert!(
+        out2.contains("✓ 0 synced"),
+        "expected no-op summary: {out2}"
+    );
 }
 
 fn find_conflict_file(dir: &std::path::Path, base: &str) -> Option<PathBuf> {
     fs::read_dir(dir).ok()?.flatten().find_map(|e| {
         let name = e.file_name().to_string_lossy().to_string();
-        name.starts_with(&format!("{base}.xsync-conflict.")).then(|| e.path())
+        name.starts_with(&format!("{base}.xsync-conflict."))
+            .then(|| e.path())
     })
 }
 
@@ -148,13 +183,19 @@ fn full_cross_device_roundtrip_with_path_rewrite() {
     assert_eq!(c, 0, "{o}");
 
     // projects dir renamed to dev_b's encoded home
-    let proj = env.dev_b.claude().join(format!("projects/{}-ws-app", env.dev_b.enc_home()));
+    let proj = env
+        .dev_b
+        .claude()
+        .join(format!("projects/{}-ws-app", env.dev_b.enc_home()));
     let content = fs::read_to_string(proj.join("s.jsonl")).unwrap();
     assert!(
         content.contains(&format!("{}/ws/app", env.dev_b.home_str())),
         "cwd not rewritten to dev_b home: {content}"
     );
-    assert!(!content.contains(&env.dev_a.home_str()), "dev_a home leaked: {content}");
+    assert!(
+        !content.contains(&env.dev_a.home_str()),
+        "dev_a home leaked: {content}"
+    );
 }
 
 #[test]
@@ -169,7 +210,11 @@ fn forgot_push_scenario_c3_no_deadlock_no_loss() {
     assert_eq!(c, 0, "{o}");
 
     // B: edit settings + append a history line, push
-    fs::write(env.dev_b.claude().join("settings.json"), b"{\"model\":\"haiku\"}").unwrap();
+    fs::write(
+        env.dev_b.claude().join("settings.json"),
+        b"{\"model\":\"haiku\"}",
+    )
+    .unwrap();
     let mut hb = fs::read(env.dev_b.claude().join("history.jsonl")).unwrap();
     hb.extend_from_slice(b"{\"display\":\"cmd-b\"}\n");
     fs::write(env.dev_b.claude().join("history.jsonl"), &hb).unwrap();
@@ -181,22 +226,32 @@ fn forgot_push_scenario_c3_no_deadlock_no_loss() {
     let mut ha = fs::read(env.dev_a.claude().join("history.jsonl")).unwrap();
     ha.extend_from_slice(b"{\"display\":\"cmd-a2\"}\n");
     fs::write(env.dev_a.claude().join("history.jsonl"), &ha).unwrap();
-    fs::write(env.dev_a.claude().join("settings.json"), b"{\"model\":\"opus-4.8\"}").unwrap();
+    fs::write(
+        env.dev_a.claude().join("settings.json"),
+        b"{\"model\":\"opus-4.8\"}",
+    )
+    .unwrap();
 
     let (c, o) = run(&env.dev_a, &["pull"]);
     assert_eq!(c, 0, "pull must complete: {o}");
 
     // local-only new file preserved
-    assert_eq!(fs::read(env.dev_a.claude().join("CLAUDE.md")).unwrap(), b"# my rules\n");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("CLAUDE.md")).unwrap(),
+        b"# my rules\n"
+    );
     // history = line union (remote lines + local-only lines)
     let h = fs::read_to_string(env.dev_a.claude().join("history.jsonl")).unwrap();
     for needle in ["cmd-a", "cmd-b", "cmd-a2"] {
         assert!(h.contains(needle), "history union missing {needle}: {h}");
     }
     // settings = remote version, local version kept as conflict copy
-    assert_eq!(fs::read(env.dev_a.claude().join("settings.json")).unwrap(), b"{\"model\":\"haiku\"}");
-    let conflict = find_conflict_file(&env.dev_a.claude(), "settings.json")
-        .expect("conflict copy must exist");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"haiku\"}"
+    );
+    let conflict =
+        find_conflict_file(&env.dev_a.claude(), "settings.json").expect("conflict copy must exist");
     assert_eq!(fs::read(conflict).unwrap(), b"{\"model\":\"opus-4.8\"}");
 }
 
@@ -236,7 +291,11 @@ fn squash_recovery() {
 
     // two more pushes from A
     for v in ["v1", "v2"] {
-        fs::write(env.dev_a.claude().join("settings.json"), format!("{{\"model\":\"{v}\"}}")).unwrap();
+        fs::write(
+            env.dev_a.claude().join("settings.json"),
+            format!("{{\"model\":\"{v}\"}}"),
+        )
+        .unwrap();
         let (c, o) = run(&env.dev_a, &["push"]);
         assert_eq!(c, 0, "{o}");
     }
@@ -244,7 +303,11 @@ fn squash_recovery() {
     // squash history into a single commit
     let (c, o) = run(&env.dev_a, &["gc", "--squash"]);
     assert_eq!(c, 0, "{o}");
-    assert_eq!(bare_commit_count(&env), "1", "history must be a single commit");
+    assert_eq!(
+        bare_commit_count(&env),
+        "1",
+        "history must be a single commit"
+    );
 
     // B pull auto-recovers from the rewritten history
     let (c, o) = run(&env.dev_b, &["pull"]);
@@ -266,7 +329,11 @@ fn rekey_reencrypts_and_squashes_old_key_out() {
     assert_eq!(c, 0, "{o}");
 
     // rekey on A with a new passphrase
-    let (c, o) = run_env(&env.dev_a, &["rekey"], &[("XSYNC_NEW_PASSPHRASE", "new-pass")]);
+    let (c, o) = run_env(
+        &env.dev_a,
+        &["rekey"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
     assert_eq!(c, 0, "rekey failed: {o}");
 
     // old-key history is gone: single commit
@@ -281,7 +348,15 @@ fn rekey_reencrypts_and_squashes_old_key_out() {
     fs::create_dir_all(dev_c.claude()).unwrap();
     let (c, o) = run_env(
         &dev_c,
-        &["init", "--remote", &env.bare_url(), "--device", "linux", "--passphrase-env", "XSYNC_PASSPHRASE"],
+        &[
+            "init",
+            "--remote",
+            &env.bare_url(),
+            "--device",
+            "linux",
+            "--passphrase-env",
+            "XSYNC_PASSPHRASE",
+        ],
         &[("XSYNC_PASSPHRASE", "new-pass")],
     );
     assert_eq!(c, 0, "init with new passphrase failed: {o}");

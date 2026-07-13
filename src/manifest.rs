@@ -20,7 +20,10 @@ pub struct Entry {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
-pub enum EntryMode { Transformed, Verbatim }
+pub enum EntryMode {
+    Transformed,
+    Verbatim,
+}
 
 pub const CHUNK_SIZE: usize = 90 * 1024 * 1024;
 
@@ -29,12 +32,16 @@ pub fn chunk_paths(object: &str, chunks: u32) -> Vec<String> {
     if chunks <= 1 {
         vec![format!("objects/{object}.age")]
     } else {
-        (0..chunks).map(|i| format!("objects/{object}.age.{i}")).collect()
+        (0..chunks)
+            .map(|i| format!("objects/{object}.age.{i}"))
+            .collect()
     }
 }
 
 pub fn split_chunks(sealed: &[u8]) -> Vec<&[u8]> {
-    if sealed.is_empty() { return vec![&[]]; }
+    if sealed.is_empty() {
+        return vec![&[]];
+    }
     sealed.chunks(CHUNK_SIZE).collect()
 }
 
@@ -55,7 +62,12 @@ mod tests {
                 mode: EntryMode::Transformed,
             },
         );
-        let m = Manifest { version: 1, last_push_device: "mac".into(), last_push_ts: 1234, entries };
+        let m = Manifest {
+            version: 1,
+            last_push_device: "mac".into(),
+            last_push_ts: 1234,
+            entries,
+        };
         let json = serde_json::to_vec(&m).unwrap();
         let back: Manifest = serde_json::from_slice(&json).unwrap();
         assert_eq!(back.version, 1);
@@ -79,7 +91,11 @@ mod tests {
         assert_eq!(chunk_paths("ab", 1), vec!["objects/ab.age".to_string()]);
         assert_eq!(
             chunk_paths("ab", 3),
-            vec!["objects/ab.age.0".to_string(), "objects/ab.age.1".to_string(), "objects/ab.age.2".to_string()]
+            vec![
+                "objects/ab.age.0".to_string(),
+                "objects/ab.age.1".to_string(),
+                "objects/ab.age.2".to_string()
+            ]
         );
     }
 }

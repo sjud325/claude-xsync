@@ -22,7 +22,9 @@ pub struct PathMapper {
 }
 
 pub fn encode_claude_path(p: &str) -> String {
-    p.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+    p.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn valid_name(n: &str) -> bool {
@@ -44,12 +46,20 @@ impl PathMapper {
             }
             let local = trim(local);
             let enc_local = encode_claude_path(&local);
-            tokens.push(TokenMapping { name: name.clone(), local, enc_local });
+            tokens.push(TokenMapping {
+                name: name.clone(),
+                local,
+                enc_local,
+            });
         }
         let home = trim(home);
         let enc_local = encode_claude_path(&home);
-        tokens.push(TokenMapping { name: "HOME".into(), local: home, enc_local });
-        tokens.sort_by(|a, b| b.local.len().cmp(&a.local.len()));
+        tokens.push(TokenMapping {
+            name: "HOME".into(),
+            local: home,
+            enc_local,
+        });
+        tokens.sort_by_key(|t| std::cmp::Reverse(t.local.len()));
         Ok(PathMapper { tokens })
     }
 }

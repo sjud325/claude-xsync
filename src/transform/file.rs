@@ -1,26 +1,45 @@
 use crate::mapper::PathMapper;
 use crate::transform::dirkey::UnmappedToken;
-use crate::transform::json_spans::{decode_json_string, encode_json_string, string_spans, LexError};
+use crate::transform::json_spans::{
+    decode_json_string, encode_json_string, string_spans, LexError,
+};
 use crate::transform::pathmatch::{normalize_text, resolve_text, ResolveMode, SpanRecord};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum FileKind { Jsonl, Json, PlainText, FileHistorySnapshot, Unknown }
+pub enum FileKind {
+    Jsonl,
+    Json,
+    PlainText,
+    FileHistorySnapshot,
+    Unknown,
+}
 
 pub fn classify(rel_path: &str) -> FileKind {
     let rel = rel_path.replace('\\', "/");
     if rel.starts_with("file-history/") && !rel.ends_with(".json") {
         return FileKind::FileHistorySnapshot;
     }
-    if rel.ends_with(".jsonl") { return FileKind::Jsonl; }
-    if rel.ends_with(".json") { return FileKind::Json; }
-    if rel.ends_with(".md") || rel.ends_with(".txt") { return FileKind::PlainText; }
+    if rel.ends_with(".jsonl") {
+        return FileKind::Jsonl;
+    }
+    if rel.ends_with(".json") {
+        return FileKind::Json;
+    }
+    if rel.ends_with(".md") || rel.ends_with(".txt") {
+        return FileKind::PlainText;
+    }
     FileKind::Unknown
 }
 
 #[derive(Debug)]
 pub enum TransformOutcome {
-    Transformed { data: Vec<u8>, spans: Vec<Vec<SpanRecord>> }, // per line
-    Verbatim { reason: String },
+    Transformed {
+        data: Vec<u8>,
+        spans: Vec<Vec<SpanRecord>>,
+    }, // per line
+    Verbatim {
+        reason: String,
+    },
 }
 
 /// Splice one JSONL/JSON line: rewrite only the string tokens whose decoded
@@ -48,22 +67,37 @@ fn transform_line(line: &[u8], m: &PathMapper) -> Result<(Vec<u8>, Vec<SpanRecor
 
 pub fn normalize_file(rel_path: &str, data: &[u8], m: &PathMapper) -> TransformOutcome {
     match classify(rel_path) {
-        FileKind::FileHistorySnapshot => TransformOutcome::Verbatim { reason: "file-history snapshot (undo bytes sacred)".into() },
-        FileKind::Unknown => TransformOutcome::Verbatim { reason: "unknown format".into() },
+        FileKind::FileHistorySnapshot => TransformOutcome::Verbatim {
+            reason: "file-history snapshot (undo bytes sacred)".into(),
+        },
+        FileKind::Unknown => TransformOutcome::Verbatim {
+            reason: "unknown format".into(),
+        },
         FileKind::PlainText => {
             let Ok(text) = std::str::from_utf8(data) else {
-                return TransformOutcome::Verbatim { reason: "non-utf8 text".into() };
+                return TransformOutcome::Verbatim {
+                    reason: "non-utf8 text".into(),
+                };
             };
             let n = normalize_text(text, m);
-            TransformOutcome::Transformed { data: n.text.into_bytes(), spans: vec![n.spans] }
+            TransformOutcome::Transformed {
+                data: n.text.into_bytes(),
+                spans: vec![n.spans],
+            }
         }
         FileKind::Jsonl | FileKind::Json => {
             let mut out = Vec::with_capacity(data.len());
             let mut spans = Vec::new();
             for line in split_lines(data) {
                 match transform_line(line, m) {
-                    Ok((bytes, records)) => { out.extend(bytes); spans.push(records); }
-                    Err(_) => { out.extend_from_slice(line); spans.push(Vec::new()); } // line-level fail-closed
+                    Ok((bytes, records)) => {
+                        out.extend(bytes);
+                        spans.push(records);
+                    }
+                    Err(_) => {
+                        out.extend_from_slice(line);
+                        spans.push(Vec::new());
+                    } // line-level fail-closed
                 }
             }
             TransformOutcome::Transformed { data: out, spans }
@@ -71,11 +105,17 @@ pub fn normalize_file(rel_path: &str, data: &[u8], m: &PathMapper) -> TransformO
     }
 }
 
-pub fn resolve_file_pull(rel_path: &str, data: &[u8], m: &PathMapper) -> Result<Vec<u8>, UnmappedToken> {
+pub fn resolve_file_pull(
+    rel_path: &str,
+    data: &[u8],
+    m: &PathMapper,
+) -> Result<Vec<u8>, UnmappedToken> {
     match classify(rel_path) {
         FileKind::FileHistorySnapshot | FileKind::Unknown => Ok(data.to_vec()),
         FileKind::PlainText => {
-            let Ok(text) = std::str::from_utf8(data) else { return Ok(data.to_vec()); };
+            let Ok(text) = std::str::from_utf8(data) else {
+                return Ok(data.to_vec());
+            };
             Ok(resolve_text(text, m, ResolveMode::Pull).into_bytes())
         }
         FileKind::Jsonl | FileKind::Json => {
@@ -101,7 +141,11 @@ fn resolve_line_pull(line: &[u8], m: &PathMapper) -> Option<Vec<u8>> {
         let decoded = decode_json_string(raw).ok()?;
         if decoded.contains("${") {
             let resolved = resolve_text(&decoded, m, ResolveMode::Pull);
-            if resolved != decoded { out.extend(encode_json_string(&resolved)); } else { out.extend_from_slice(raw); }
+            if resolved != decoded {
+                out.extend(encode_json_string(&resolved));
+            } else {
+                out.extend_from_slice(raw);
+            }
         } else {
             out.extend_from_slice(raw);
         }
@@ -113,7 +157,11 @@ fn resolve_line_pull(line: &[u8], m: &PathMapper) -> Option<Vec<u8>> {
 
 /// Re-splice recorded original spans into a transformed JSON line (invariant A).
 /// Returns None on any accounting mismatch.
-pub(crate) fn verify_resolve_line(trans: &[u8], records: &[SpanRecord], m: &PathMapper) -> Option<Vec<u8>> {
+pub(crate) fn verify_resolve_line(
+    trans: &[u8],
+    records: &[SpanRecord],
+    m: &PathMapper,
+) -> Option<Vec<u8>> {
     use crate::transform::pathmatch::count_resolvable_tokens;
     let spans = string_spans(trans).ok()?;
     let mut out = Vec::with_capacity(trans.len());
@@ -125,10 +173,16 @@ pub(crate) fn verify_resolve_line(trans: &[u8], records: &[SpanRecord], m: &Path
         let decoded = decode_json_string(raw).ok()?;
         if decoded.contains("${") {
             let cnt = count_resolvable_tokens(&decoded, m);
-            if idx + cnt > records.len() { return None; }
+            if idx + cnt > records.len() {
+                return None;
+            }
             let resolved = resolve_text(&decoded, m, ResolveMode::Verify(&records[idx..idx + cnt]));
             idx += cnt;
-            if resolved != decoded { out.extend(encode_json_string(&resolved)); } else { out.extend_from_slice(raw); }
+            if resolved != decoded {
+                out.extend(encode_json_string(&resolved));
+            } else {
+                out.extend_from_slice(raw);
+            }
         } else {
             out.extend_from_slice(raw);
         }
@@ -139,7 +193,9 @@ pub(crate) fn verify_resolve_line(trans: &[u8], records: &[SpanRecord], m: &Path
 }
 
 pub(crate) fn split_lines(data: &[u8]) -> Vec<&[u8]> {
-    if data.is_empty() { return vec![]; }
+    if data.is_empty() {
+        return vec![];
+    }
     data.split_inclusive(|&b| b == b'\n').collect()
 }
 
@@ -150,8 +206,12 @@ mod tests {
     use crate::verify::push_gate;
     use std::collections::BTreeMap;
 
-    fn mac() -> PathMapper { PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap() }
-    fn win() -> PathMapper { PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap() }
+    fn mac() -> PathMapper {
+        PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap()
+    }
+    fn win() -> PathMapper {
+        PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap()
+    }
 
     #[test]
     fn jsonl_cwd_and_key_paths_rewritten() {
@@ -193,8 +253,10 @@ mod tests {
         let m = win();
         let line = br#"{"cwd":"C:\\Users\\Loki\\ws\\app"}"#;
         // must NOT degrade to verbatim (the C1 regression test)
-        assert!(matches!(push_gate("projects/x/s.jsonl", line, &m),
-                         TransformOutcome::Transformed { .. }));
+        assert!(matches!(
+            push_gate("projects/x/s.jsonl", line, &m),
+            TransformOutcome::Transformed { .. }
+        ));
     }
 
     #[test]

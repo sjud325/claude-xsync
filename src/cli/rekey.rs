@@ -61,7 +61,9 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
                 mode: lf.mode,
             },
         );
-        new_state.files.insert(portable.clone(), lf.portable_hash.clone());
+        new_state
+            .files
+            .insert(portable.clone(), lf.portable_hash.clone());
     }
     write_manifest(
         &repo,

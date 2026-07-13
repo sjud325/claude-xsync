@@ -15,14 +15,22 @@ impl Git {
 
     pub fn clone_or_open(remote: &str, repo: &Path) -> anyhow::Result<Git> {
         if repo.join(".git").is_dir() {
-            return Ok(Git { repo: repo.to_path_buf() });
+            return Ok(Git {
+                repo: repo.to_path_buf(),
+            });
         }
         let parent = repo.parent().unwrap_or(Path::new("."));
         std::fs::create_dir_all(parent)?;
         run_git(parent, &["clone", remote, &repo.to_string_lossy()])?;
-        let git = Git { repo: repo.to_path_buf() };
+        let git = Git {
+            repo: repo.to_path_buf(),
+        };
         // Standardize on `main` even when cloning an empty remote.
-        if git.run(&["rev-parse", "--abbrev-ref", "HEAD"]).map(|b| b != "main").unwrap_or(true) {
+        if git
+            .run(&["rev-parse", "--abbrev-ref", "HEAD"])
+            .map(|b| b != "main")
+            .unwrap_or(true)
+        {
             git.run(&["checkout", "-B", "main"])?;
         }
         Ok(git)
@@ -52,8 +60,12 @@ impl Git {
 
     /// Neither HEAD nor origin/main is an ancestor of the other (force-push signal).
     pub fn diverged(&self) -> anyhow::Result<bool> {
-        let Ok(head) = self.head() else { return Ok(false) };
-        let Some(remote) = self.remote_head()? else { return Ok(false) };
+        let Ok(head) = self.head() else {
+            return Ok(false);
+        };
+        let Some(remote) = self.remote_head()? else {
+            return Ok(false);
+        };
         if head == remote {
             return Ok(false);
         }
@@ -71,9 +83,13 @@ impl Git {
         let dirty = !self.run(&["status", "--porcelain"])?.is_empty();
         if dirty {
             self.run(&[
-                "-c", "user.name=claude-xsync",
-                "-c", "user.email=xsync@localhost",
-                "commit", "-m", msg,
+                "-c",
+                "user.name=claude-xsync",
+                "-c",
+                "user.email=xsync@localhost",
+                "commit",
+                "-m",
+                msg,
             ])?;
         }
         self.head()
@@ -93,9 +109,13 @@ impl Git {
         self.run(&["checkout", "--orphan", "xsync-squash"])?;
         self.run(&["add", "-A"])?;
         self.run(&[
-            "-c", "user.name=claude-xsync",
-            "-c", "user.email=xsync@localhost",
-            "commit", "-m", msg,
+            "-c",
+            "user.name=claude-xsync",
+            "-c",
+            "user.email=xsync@localhost",
+            "commit",
+            "-m",
+            msg,
         ])?;
         self.run(&["branch", "-M", "main"])?;
         self.push_force()

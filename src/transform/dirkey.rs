@@ -21,7 +21,9 @@ pub fn key_to_portable(seg: &str, m: &PathMapper) -> String {
 }
 
 pub fn portable_to_key(seg: &str, m: &PathMapper) -> Result<String, UnmappedToken> {
-    if !seg.starts_with("${") { return Ok(seg.to_string()); }
+    if !seg.starts_with("${") {
+        return Ok(seg.to_string());
+    }
     for t in &m.tokens {
         let tok = format!("${{{}}}", t.name);
         if let Some(rest) = seg.strip_prefix(&tok) {
@@ -38,20 +40,33 @@ mod tests {
     use crate::mapper::PathMapper;
     use std::collections::BTreeMap;
 
-    fn mac() -> PathMapper { PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap() }
-    fn win() -> PathMapper { PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap() }
+    fn mac() -> PathMapper {
+        PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap()
+    }
+    fn win() -> PathMapper {
+        PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap()
+    }
 
     #[test]
     fn roundtrip_both_oses() {
         let p = key_to_portable("-Users-woong-workspace-foo", &mac());
         assert_eq!(p, "${HOME}-workspace-foo");
-        assert_eq!(portable_to_key(&p, &win()).unwrap(), "C--Users-Loki-workspace-foo");
-        assert_eq!(portable_to_key(&p, &mac()).unwrap(), "-Users-woong-workspace-foo");
+        assert_eq!(
+            portable_to_key(&p, &win()).unwrap(),
+            "C--Users-Loki-workspace-foo"
+        );
+        assert_eq!(
+            portable_to_key(&p, &mac()).unwrap(),
+            "-Users-woong-workspace-foo"
+        );
     }
 
     #[test]
     fn boundary_blocks_woongho() {
-        assert_eq!(key_to_portable("-Users-woongho-app", &mac()), "-Users-woongho-app");
+        assert_eq!(
+            key_to_portable("-Users-woongho-app", &mac()),
+            "-Users-woongho-app"
+        );
     }
 
     #[test]
@@ -66,6 +81,9 @@ mod tests {
 
     #[test]
     fn unknown_token_is_error() {
-        assert!(matches!(portable_to_key("${WORK}-x", &mac()), Err(UnmappedToken(_))));
+        assert!(matches!(
+            portable_to_key("${WORK}-x", &mac()),
+            Err(UnmappedToken(_))
+        ));
     }
 }

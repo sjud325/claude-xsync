@@ -32,7 +32,11 @@ pub fn derive(passphrase: &str, salt: &[u8; 32]) -> Keys {
     let recipient = identity.to_public();
     let mut hmac_key = [0u8; 32];
     hmac_key.copy_from_slice(&out[32..]);
-    Keys { identity, recipient, hmac_key }
+    Keys {
+        identity,
+        recipient,
+        hmac_key,
+    }
 }
 
 /// gzip(level 6) then age-encrypt to the recipient.
@@ -43,8 +47,11 @@ pub fn seal(plain: &[u8], r: &Recipient) -> Vec<u8> {
     let encryptor = age::Encryptor::with_recipients(vec![Box::new(r.clone())])
         .expect("one recipient is always provided");
     let mut sealed = Vec::new();
-    let mut w = encryptor.wrap_output(&mut sealed).expect("in-memory write cannot fail");
-    w.write_all(&compressed).expect("in-memory write cannot fail");
+    let mut w = encryptor
+        .wrap_output(&mut sealed)
+        .expect("in-memory write cannot fail");
+    w.write_all(&compressed)
+        .expect("in-memory write cannot fail");
     w.finish().expect("in-memory write cannot fail");
     sealed
 }
@@ -83,7 +90,10 @@ mod tests {
         let b = derive("hunter2", &salt);
         assert_eq!(a.recipient.to_string(), b.recipient.to_string());
         assert_eq!(a.hmac_key, b.hmac_key);
-        assert_ne!(derive("hunter2", &[8u8; 32]).recipient.to_string(), a.recipient.to_string());
+        assert_ne!(
+            derive("hunter2", &[8u8; 32]).recipient.to_string(),
+            a.recipient.to_string()
+        );
     }
 
     #[test]
@@ -108,7 +118,10 @@ mod tests {
         let k = derive("pw", &[1u8; 32]);
         let n1 = object_name(&k.hmac_key, "settings.json");
         assert_eq!(n1, object_name(&k.hmac_key, "settings.json"));
-        assert_ne!(n1, object_name(&derive("other", &[1u8;32]).hmac_key, "settings.json"));
+        assert_ne!(
+            n1,
+            object_name(&derive("other", &[1u8; 32]).hmac_key, "settings.json")
+        );
         assert!(n1.chars().all(|c| c.is_ascii_hexdigit()));
     }
 }

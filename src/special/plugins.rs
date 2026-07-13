@@ -6,7 +6,9 @@ use std::path::Path;
 /// [Spec §4 implementation-time note: verify reinstall behavior on a real
 /// machine; adjust the include set there if needed.]
 pub fn plugin_manifest_rels(plugins_dir: &Path) -> Vec<String> {
-    let Ok(rd) = std::fs::read_dir(plugins_dir) else { return Vec::new(); };
+    let Ok(rd) = std::fs::read_dir(plugins_dir) else {
+        return Vec::new();
+    };
     let mut rels: Vec<String> = rd
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
@@ -31,7 +33,13 @@ mod tests {
         fs::write(plugins.join("installed.json"), b"{}").unwrap();
         fs::write(plugins.join("cache/some-plugin/build.node"), b"bin").unwrap();
         let rels = plugin_manifest_rels(&plugins);
-        assert_eq!(rels, vec!["plugins/config.json".to_string(), "plugins/installed.json".to_string()]);
+        assert_eq!(
+            rels,
+            vec![
+                "plugins/config.json".to_string(),
+                "plugins/installed.json".to_string()
+            ]
+        );
     }
 
     #[test]

@@ -22,10 +22,25 @@ pub struct PullOpts {
 /// Staged resolutions — nothing under ~/.claude changes until every entry
 /// has been staged (spec §7 apply procedure).
 enum Planned {
-    Write { rel: String, bytes: Vec<u8>, portable: String, hash: String, conflict_local: Option<Vec<u8>> },
-    McpMerge { subtree: String, hash: String },
-    Delete { rel: Option<String>, portable: String },
-    StateOnly { portable: String, hash: String },
+    Write {
+        rel: String,
+        bytes: Vec<u8>,
+        portable: String,
+        hash: String,
+        conflict_local: Option<Vec<u8>>,
+    },
+    McpMerge {
+        subtree: String,
+        hash: String,
+    },
+    Delete {
+        rel: Option<String>,
+        portable: String,
+    },
+    StateOnly {
+        portable: String,
+        hash: String,
+    },
 }
 
 pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
@@ -64,7 +79,8 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
         // remote get anchored, everything else falls to classification.
         for (portable, entry) in &manifest.entries {
             if locals.get(portable).map(|l| &l.portable_hash) == Some(&entry.plaintext_hash) {
-                st.files.insert(portable.clone(), entry.plaintext_hash.clone());
+                st.files
+                    .insert(portable.clone(), entry.plaintext_hash.clone());
             }
         }
         state::save_state(&st)?;
@@ -102,7 +118,10 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                     continue; // in-sync or local-only changed — preserve (push target)
                 }
                 if local_h.as_deref() == Some(e.plaintext_hash.as_str()) {
-                    planned.push(Planned::StateOnly { portable: portable.clone(), hash: e.plaintext_hash.clone() });
+                    planned.push(Planned::StateOnly {
+                        portable: portable.clone(),
+                        hash: e.plaintext_hash.clone(),
+                    });
                     continue;
                 }
                 let bytes = match stage_entry(&repo, &keys, &portable, e, &mapper) {
@@ -115,7 +134,10 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 };
                 if portable == MCP_PORTABLE {
                     match String::from_utf8(bytes) {
-                        Ok(subtree) => planned.push(Planned::McpMerge { subtree, hash: e.plaintext_hash.clone() }),
+                        Ok(subtree) => planned.push(Planned::McpMerge {
+                            subtree,
+                            hash: e.plaintext_hash.clone(),
+                        }),
                         Err(_) => {
                             println!("✗ skipping {portable}: mcp subtree is not utf-8");
                             summary.skipped += 1;
@@ -134,20 +156,28 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 let local_exists_changed = local.is_some() && local_changed;
                 if !local_exists_changed {
                     planned.push(Planned::Write {
-                        rel, bytes, portable: portable.clone(),
-                        hash: e.plaintext_hash.clone(), conflict_local: None,
+                        rel,
+                        bytes,
+                        portable: portable.clone(),
+                        hash: e.plaintext_hash.clone(),
+                        conflict_local: None,
                     });
                 } else if rel == "history.jsonl" {
                     // append-only special case: line-set union, no conflict copy
                     let merged = union_jsonl(&local.unwrap().raw, &bytes);
                     planned.push(Planned::Write {
-                        rel, bytes: merged, portable: portable.clone(),
-                        hash: e.plaintext_hash.clone(), conflict_local: None,
+                        rel,
+                        bytes: merged,
+                        portable: portable.clone(),
+                        hash: e.plaintext_hash.clone(),
+                        conflict_local: None,
                     });
                 } else {
                     summary.conflicts += 1;
                     planned.push(Planned::Write {
-                        rel, bytes, portable: portable.clone(),
+                        rel,
+                        bytes,
+                        portable: portable.clone(),
                         hash: e.plaintext_hash.clone(),
                         conflict_local: Some(local.unwrap().raw.clone()),
                     });
@@ -159,13 +189,24 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     if opts.dry_run {
         for p in &planned {
             match p {
-                Planned::Write { rel, conflict_local, .. } => println!(
+                Planned::Write {
+                    rel,
+                    conflict_local,
+                    ..
+                } => println!(
                     "would apply {rel}{}",
-                    if conflict_local.is_some() { " (conflict — local copy kept)" } else { "" }
+                    if conflict_local.is_some() {
+                        " (conflict — local copy kept)"
+                    } else {
+                        ""
+                    }
                 ),
                 Planned::McpMerge { .. } => println!("would merge mcpServers into ~/.claude.json"),
                 Planned::Delete { rel, portable } => {
-                    println!("would remove {} (deleted on remote)", rel.as_deref().unwrap_or(portable))
+                    println!(
+                        "would remove {} (deleted on remote)",
+                        rel.as_deref().unwrap_or(portable)
+                    )
                 }
                 Planned::StateOnly { portable, .. } => println!("already in sync: {portable}"),
             }
@@ -192,18 +233,28 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     let claude_json_path = home.join(".claude.json");
     for p in planned {
         match p {
-            Planned::Write { rel, bytes, portable, hash, conflict_local } => {
+            Planned::Write {
+                rel,
+                bytes,
+                portable,
+                hash,
+                conflict_local,
+            } => {
                 if let Some(local_raw) = conflict_local {
                     let cpath = claude_dir.join(format!("{rel}.xsync-conflict.{stamp}"));
                     crate::fsx::atomic_write(&cpath, &local_raw)?;
-                    println!("⚡ conflict on {rel}: your version kept at {}", cpath.display());
+                    println!(
+                        "⚡ conflict on {rel}: your version kept at {}",
+                        cpath.display()
+                    );
                 }
                 crate::fsx::atomic_write(&claude_dir.join(&rel), &bytes)?;
                 state::upsert_and_save(&mut st, &portable, &hash)?;
                 summary.synced += 1;
             }
             Planned::McpMerge { subtree, hash } => {
-                let current = std::fs::read_to_string(&claude_json_path).unwrap_or_else(|_| "{}".into());
+                let current =
+                    std::fs::read_to_string(&claude_json_path).unwrap_or_else(|_| "{}".into());
                 let merged = merge_mcp(&current, &subtree)?;
                 crate::fsx::atomic_write(&claude_json_path, merged.as_bytes())?;
                 state::upsert_and_save(&mut st, MCP_PORTABLE, &hash)?;
@@ -243,7 +294,10 @@ fn stage_entry(
 ) -> anyhow::Result<Vec<u8>> {
     let mut sealed = Vec::new();
     for rel in chunk_paths(&e.object, e.chunks) {
-        sealed.extend(std::fs::read(repo.join(&rel)).map_err(|err| anyhow::anyhow!("missing object chunk {rel}: {err}"))?);
+        sealed.extend(
+            std::fs::read(repo.join(&rel))
+                .map_err(|err| anyhow::anyhow!("missing object chunk {rel}: {err}"))?,
+        );
     }
     let payload = crate::crypto::open(&sealed, &keys.identity)?;
     if sha256_bytes(&payload) != e.plaintext_hash {
@@ -256,7 +310,9 @@ fn stage_entry(
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
             match normalize_file(portable, &resolved, mapper) {
                 TransformOutcome::Transformed { data, .. } if data == payload => Ok(resolved),
-                _ => anyhow::bail!("pull reverse-verify failed (resolved form does not re-normalize)"),
+                _ => anyhow::bail!(
+                    "pull reverse-verify failed (resolved form does not re-normalize)"
+                ),
             }
         }
     }

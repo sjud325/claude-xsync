@@ -1,17 +1,27 @@
 use crate::mapper::PathMapper;
 
 #[derive(Debug, Clone)]
-pub struct SpanRecord { pub original: String }
+pub struct SpanRecord {
+    pub original: String,
+}
 
 #[derive(Debug)]
-pub struct NormalizedText { pub text: String, pub spans: Vec<SpanRecord> }
+pub struct NormalizedText {
+    pub text: String,
+    pub spans: Vec<SpanRecord>,
+}
 
-pub enum ResolveMode<'a> { Verify(&'a [SpanRecord]), Pull }
+pub enum ResolveMode<'a> {
+    Verify(&'a [SpanRecord]),
+    Pull,
+}
 
 const ESC: &str = "${ESC}";
 
 fn is_run_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '\\' | '~' | '+' | '@') || !c.is_ascii()
+    c.is_alphanumeric()
+        || matches!(c, '_' | '-' | '.' | '/' | '\\' | '~' | '+' | '@')
+        || !c.is_ascii()
 }
 
 /// Case-insensitive prefix match of `local` (with both separator variants)
@@ -31,7 +41,7 @@ fn match_local_at(text: &str, pos: usize, local: &str) -> Option<usize> {
     // boundary: next char must be a separator, non-run char, or end
     match rest[matched..].chars().next() {
         None => Some(matched),
-        Some(c) if matches!(c, '/' | '\\') => Some(matched),
+        Some('/' | '\\') => Some(matched),
         Some(c) if !is_run_char(c) => Some(matched),
         _ => None,
     }
@@ -50,7 +60,11 @@ pub fn normalize_text(input: &str, m: &PathMapper) -> NormalizedText {
                 let run_start = i + len;
                 let mut run_end = run_start;
                 for c in escaped[run_start..].chars() {
-                    if is_run_char(c) { run_end += c.len_utf8(); } else { break; }
+                    if is_run_char(c) {
+                        run_end += c.len_utf8();
+                    } else {
+                        break;
+                    }
                 }
                 // Original span must be recovered from pre-escape input: since
                 // ESC substitution only rewrites "${", and "${" cannot occur
@@ -88,7 +102,11 @@ pub(crate) fn count_resolvable_tokens(input: &str, m: &PathMapper) -> usize {
                     let run_start = i + tok.len();
                     let mut run_end = run_start;
                     for c in input[run_start..].chars() {
-                        if is_run_char(c) { run_end += c.len_utf8(); } else { break; }
+                        if is_run_char(c) {
+                            run_end += c.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
                     i = run_end;
                     continue 'outer;
@@ -115,7 +133,11 @@ pub fn resolve_text(input: &str, m: &PathMapper, mode: ResolveMode) -> String {
                     let run_start = i + tok.len();
                     let mut run_end = run_start;
                     for c in input[run_start..].chars() {
-                        if is_run_char(c) { run_end += c.len_utf8(); } else { break; }
+                        if is_run_char(c) {
+                            run_end += c.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
                     match &mode {
                         ResolveMode::Verify(spans) => {
@@ -145,8 +167,12 @@ mod tests {
     use crate::mapper::PathMapper;
     use std::collections::BTreeMap;
 
-    fn mac() -> PathMapper { PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap() }
-    fn win() -> PathMapper { PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap() }
+    fn mac() -> PathMapper {
+        PathMapper::new("/Users/woong", &BTreeMap::new()).unwrap()
+    }
+    fn win() -> PathMapper {
+        PathMapper::new("C:\\Users\\Loki", &BTreeMap::new()).unwrap()
+    }
 
     #[test]
     fn mac_path_tokenized() {
@@ -186,13 +212,18 @@ mod tests {
         let n = normalize_text("run ${HOME}/bin and ${ESC} too", &mac());
         assert_eq!(n.text, "run ${ESC}HOME}/bin and ${ESC}ESC} too");
         // pull restores literals
-        assert_eq!(resolve_text(&n.text, &mac(), ResolveMode::Pull), "run ${HOME}/bin and ${ESC} too");
+        assert_eq!(
+            resolve_text(&n.text, &mac(), ResolveMode::Pull),
+            "run ${HOME}/bin and ${ESC} too"
+        );
     }
 
     #[test]
     fn verify_roundtrip_byte_exact_mixed() {
-        for (m, s) in [(mac(), "a /Users/woong/x b ${HOME} c /Users/woong"),
-                       (win(), r#"cwd C:\Users\Loki\p and c:/users/loki/q"#)] {
+        for (m, s) in [
+            (mac(), "a /Users/woong/x b ${HOME} c /Users/woong"),
+            (win(), r#"cwd C:\Users\Loki\p and c:/users/loki/q"#),
+        ] {
             let n = normalize_text(s, &m);
             assert_eq!(resolve_text(&n.text, &m, ResolveMode::Verify(&n.spans)), s);
         }
@@ -221,8 +252,8 @@ mod tests {
 mod prop {
     use super::*;
     use crate::mapper::PathMapper;
-    use std::collections::BTreeMap;
     use proptest::prelude::*;
+    use std::collections::BTreeMap;
     proptest! {
         #[test]
         fn invariants_a_and_b(seg in "[a-zA-Z0-9_./\\\\-]{0,24}", pre in "[ -~]{0,12}") {

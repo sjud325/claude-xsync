@@ -2,7 +2,11 @@ use clap::{Parser, Subcommand};
 use claude_xsync::cli;
 
 #[derive(Parser)]
-#[command(name = "claude-xsync", version, about = "Cross-platform ~/.claude sync over an encrypted git repo")]
+#[command(
+    name = "claude-xsync",
+    version,
+    about = "Cross-platform ~/.claude sync over an encrypted git repo"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

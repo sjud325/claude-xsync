@@ -51,8 +51,12 @@ pub fn config_path() -> PathBuf {
 
 pub fn load_config() -> anyhow::Result<Config> {
     let p = config_path();
-    let text = std::fs::read_to_string(&p)
-        .map_err(|e| anyhow::anyhow!("cannot read {} — run `claude-xsync init` first ({e})", p.display()))?;
+    let text = std::fs::read_to_string(&p).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot read {} — run `claude-xsync init` first ({e})",
+            p.display()
+        )
+    })?;
     Ok(toml::from_str(&text)?)
 }
 

@@ -18,8 +18,9 @@ fn check_or_update(path: &str, actual: &[u8]) {
         fs::write(path, actual).unwrap();
         return;
     }
-    let expected = fs::read(path)
-        .unwrap_or_else(|_| panic!("missing golden {path}; run UPDATE_GOLDEN=1 cargo test --test golden"));
+    let expected = fs::read(path).unwrap_or_else(|_| {
+        panic!("missing golden {path}; run UPDATE_GOLDEN=1 cargo test --test golden")
+    });
     assert_eq!(
         String::from_utf8_lossy(&expected),
         String::from_utf8_lossy(actual),

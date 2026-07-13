@@ -9,7 +9,11 @@ fn make_bare(dir: &std::path::Path) -> String {
         .current_dir(dir)
         .output()
         .unwrap();
-    assert!(out.status.success(), "git init --bare failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git init --bare failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     dir.to_string_lossy().to_string()
 }
 
@@ -45,11 +49,25 @@ fn force_push_divergence_detected_and_recovered() {
     // rewrite history on a (amend) and force-push
     fs::write(a.repo.join("f.txt"), b"one-rewritten").unwrap();
     let out = Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-a", "--amend", "-m", "c1'"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-a",
+            "--amend",
+            "-m",
+            "c1'",
+        ])
         .current_dir(&a.repo)
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     a.push_force().unwrap();
 
     b.fetch().unwrap();

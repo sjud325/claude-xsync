@@ -22,6 +22,8 @@ pub fn run_gc(squash: bool) -> anyhow::Result<i32> {
     let mut st = state::load_state();
     st.last_synced_commit = Some(git.head()?);
     state::save_state(&st)?;
-    println!("history squashed to a single commit — the other device will auto-recover on its next pull");
+    println!(
+        "history squashed to a single commit — the other device will auto-recover on its next pull"
+    );
     Ok(0)
 }

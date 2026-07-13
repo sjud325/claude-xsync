@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 
 /// Write via temp file in the same directory + rename; creates parents.
 pub fn atomic_write(path: &Path, data: &[u8]) -> anyhow::Result<()> {
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::create_dir_all(parent)?;
     let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
     tmp.write_all(data)?;
@@ -75,7 +78,10 @@ mod tests {
         let backup = backup_files(&claude, &rels, "20260714").unwrap();
         assert!(backup.to_string_lossy().contains(".claude.backup.20260714"));
         assert_eq!(fs::read(backup.join("settings.json")).unwrap(), b"{}");
-        assert_eq!(fs::read(backup.join("projects/a/s.jsonl")).unwrap(), b"{}\n");
+        assert_eq!(
+            fs::read(backup.join("projects/a/s.jsonl")).unwrap(),
+            b"{}\n"
+        );
         assert!(!backup.join("missing.json").exists());
     }
 

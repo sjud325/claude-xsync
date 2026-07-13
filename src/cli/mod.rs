@@ -18,8 +18,7 @@ pub fn repo_dir() -> PathBuf {
 pub fn read_salt(repo: &Path) -> anyhow::Result<[u8; 32]> {
     let raw = std::fs::read_to_string(repo.join("salt"))
         .map_err(|e| anyhow::anyhow!("missing repo salt — run init first ({e})"))?;
-    let bytes = hex::decode(raw.trim())
-        .map_err(|e| anyhow::anyhow!("corrupt salt file: {e}"))?;
+    let bytes = hex::decode(raw.trim()).map_err(|e| anyhow::anyhow!("corrupt salt file: {e}"))?;
     bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("corrupt salt file: expected 32 bytes"))
@@ -68,7 +67,13 @@ pub struct Summary {
 
 impl Summary {
     pub fn new() -> Summary {
-        Summary { synced: 0, verbatim: 0, verbatim_reasons: Vec::new(), skipped: 0, conflicts: 0 }
+        Summary {
+            synced: 0,
+            verbatim: 0,
+            verbatim_reasons: Vec::new(),
+            skipped: 0,
+            conflicts: 0,
+        }
     }
     pub fn print(&self) {
         let reasons = if self.verbatim_reasons.is_empty() {
@@ -86,7 +91,11 @@ impl Summary {
     }
     /// Exit code per spec §8: 1 = completed with warnings, 0 = clean.
     pub fn exit_code(&self) -> i32 {
-        if self.verbatim > 0 || self.skipped > 0 { 1 } else { 0 }
+        if self.verbatim > 0 || self.skipped > 0 {
+            1
+        } else {
+            0
+        }
     }
 }
 
@@ -160,15 +169,31 @@ pub fn collect_locals(
     let mut add = |portable: String, rel: Option<String>, raw: Vec<u8>| {
         let (payload, mode, reason) = match crate::verify::push_gate(&portable, &raw, mapper) {
             TransformOutcome::Transformed { data, .. } => (data, EntryMode::Transformed, None),
-            TransformOutcome::Verbatim { reason } => (raw.clone(), EntryMode::Verbatim, Some(reason)),
+            TransformOutcome::Verbatim { reason } => {
+                (raw.clone(), EntryMode::Verbatim, Some(reason))
+            }
         };
         let portable_hash = crate::scan::sha256_bytes(&payload);
-        locals.insert(portable, LocalFile { rel, raw, payload, mode, verbatim_reason: reason, portable_hash });
+        locals.insert(
+            portable,
+            LocalFile {
+                rel,
+                raw,
+                payload,
+                mode,
+                verbatim_reason: reason,
+                portable_hash,
+            },
+        );
     };
 
     let scanres = crate::scan::scan(claude_dir, cfg)?;
     for (rel, path) in &scanres.files {
-        add(rel_to_portable(rel, mapper), Some(rel.clone()), std::fs::read(path)?);
+        add(
+            rel_to_portable(rel, mapper),
+            Some(rel.clone()),
+            std::fs::read(path)?,
+        );
     }
     for rel in crate::special::plugins::plugin_manifest_rels(&claude_dir.join("plugins")) {
         let raw = std::fs::read(claude_dir.join(&rel))?;
