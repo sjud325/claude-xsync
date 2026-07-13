@@ -197,7 +197,7 @@ impl PathMapper {
 **Interfaces:**
 - Produces: `StrSpan { pub start: usize, pub end: usize }` (byte range of the escaped content, quotes excluded), `string_spans(line: &[u8]) -> Result<Vec<StrSpan>, LexError>`, `decode_json_string(raw: &[u8]) -> Result<String, LexError>`, `encode_json_string(s: &str) -> Vec<u8>` (minimal escaping: `"` `\` control chars; non-ASCII emitted raw UTF-8).
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `src/transform/mod.rs`:
 ```rust
@@ -260,8 +260,8 @@ mod prop {
 }
 ```
 
-- [ ] **Step 2: Run fail** — `cargo test json_spans` → FAIL
-- [ ] **Step 3: Implement**
+- [x] **Step 2: Run fail** — `cargo test json_spans` → FAIL
+- [x] **Step 3: Implement**
 
 ```rust
 use thiserror::Error;
@@ -369,8 +369,8 @@ pub fn encode_json_string(s: &str) -> Vec<u8> {
 }
 ```
 
-- [ ] **Step 4: Run pass** — `cargo test json_spans` (incl. proptest) → all pass
-- [ ] **Step 5: Commit** — `git commit -am "feat: JSON string-span lexer with serde proptest oracle"`
+- [x] **Step 4: Run pass** — `cargo test json_spans` (incl. proptest) → all pass
+- [x] **Step 5: Commit** — `git commit -am "feat: JSON string-span lexer with serde proptest oracle"`
 
 ---
 
@@ -1170,6 +1170,13 @@ Not tasks — a manual gate before calling v1 done, run on the actual Loki machi
 - If slash-cwd resume FAILS → implement spec §5 plan B (JSON-string-scoped backslash re-escaping in pull-resolve; the tokenizer already provides the machinery) and re-run this checklist.
 
 ## Deviation from spec (intentional, documented)
+
+### Deviations from plan discovered during implementation
+
+- **Task 2 test literal**: the plan's `handles_escapes_and_unicode` test used `br#"...한글..."#` — Rust forbids non-ASCII in raw *byte* string literals (compile error). Replaced with the byte-identical `r#"..."#.as_bytes()`. Semantics unchanged.
+- **Task 2 proptest oracle**: reproduced failure `minimal failing input: k = "z"`. `json!({k: v, "z": [...]})` collapses to one key when `k == "z"`, so the hardcoded expectation `[k, v, "z", v]` contradicts the oracle's own statement ("the strings serde sees"). Fixed with `prop_assume!(k != "z")` (degenerate-input exclusion, not a weakening — the lexer output was correct). Additionally, default `serde_json` sorts keys (BTreeMap), breaking the expected document order whenever `k > "z"`; enabled the `preserve_order` feature at Task 2 instead of Task 10 (Task 10 mandates it anyway).
+
+### Deviation from spec
 
 - Spec §5/§6 records per-span `PathShape` for verify-resolve. This plan records `SpanRecord { original: String }` instead: shape alone cannot restore case variants byte-exactly (`c:\users\loki` vs canonical), so invariant A would be unachievable. Recording the original span text is strictly stronger and keeps invariant B as the semantic check. `PathShape` remains available as a derived classification if needed later; the spec's intent (dual resolve, C1 fix) is preserved.
 
