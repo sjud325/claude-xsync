@@ -897,9 +897,9 @@ pub fn split_chunks(sealed: &[u8]) -> Vec<&[u8]>
 ```
 - Manifest serialized as JSON, then sealed with Task 6 crypto to `manifest.age`.
 
-- [ ] **Step 1: Failing tests** — serde roundtrip; `split_chunks` of 200MiB dummy → 3 chunks, concat == original; `chunk_paths("ab", 1) == ["objects/ab.age"]`, `chunk_paths("ab", 3) == ["objects/ab.age.0","objects/ab.age.1","objects/ab.age.2"]`.
-- [ ] **Step 2: Run fail**, **Step 3: Implement** (direct), **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: encrypted manifest model with 90MiB chunking"`
+- [x] **Step 1: Failing tests** — serde roundtrip; `split_chunks` of 200MiB dummy → 3 chunks, concat == original; `chunk_paths("ab", 1) == ["objects/ab.age"]`, `chunk_paths("ab", 3) == ["objects/ab.age.0","objects/ab.age.1","objects/ab.age.2"]`.
+- [x] **Step 2: Run fail**, **Step 3: Implement** (direct), **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: encrypted manifest model with 90MiB chunking"`
 
 ---
 
