@@ -734,7 +734,7 @@ pub fn push_gate(rel_path: &str, original: &[u8], m: &PathMapper) -> TransformOu
 ```
 - JSONL processing: split on `\n` (preserve exact line bytes incl. trailing `\r`); per line: `string_spans` → decode each → `normalize_text` on decoded → re-encode ONLY changed strings → splice. Lex error on a line ⇒ that line verbatim. `.md`/`.txt`: `normalize_text` on whole (lossy-utf8 rejected ⇒ Verbatim). `FileHistorySnapshot` (any path under `file-history/` not ending in `.json`): always Verbatim (undo bytes sacred). `Unknown`: Verbatim.
 
-- [ ] **Step 1: Failing tests** — key cases (write all in `src/transform/file.rs` tests):
+- [x] **Step 1: Failing tests** — key cases (write all in `src/transform/file.rs` tests):
 
 ```rust
 #[test]
@@ -790,8 +790,8 @@ fn pull_resolve_emits_slash_form_in_json() {
 }
 ```
 
-- [ ] **Step 2: Run fail** → FAIL
-- [ ] **Step 3: Implement** — structure (complete the obvious plumbing exactly as described in Interfaces; the splice loop):
+- [x] **Step 2: Run fail** → FAIL
+- [x] **Step 3: Implement** — structure (complete the obvious plumbing exactly as described in Interfaces; the splice loop):
 
 ```rust
 fn transform_line(line: &[u8], m: &PathMapper) -> Result<(Vec<u8>, Vec<SpanRecord>), LexError> {
@@ -817,8 +817,8 @@ fn transform_line(line: &[u8], m: &PathMapper) -> Result<(Vec<u8>, Vec<SpanRecor
 ```
 `normalize_file` iterates lines with `split_inclusive(|&b| b == b'\n')`; lex error ⇒ push original line bytes + empty records. `resolve_file_pull` mirrors it with `resolve_text(.., Pull)` per changed string (a string is "changed" iff it contains `${`). `push_gate` implements invariants A and B per Interfaces; on any mismatch returns `Verbatim { reason: format!("round-trip mismatch at line {}", idx) }`.
 
-- [ ] **Step 4: Run pass** — `cargo test transform verify` → pass
-- [ ] **Step 5: Commit** — `git commit -am "feat: file-level transform with line fail-closed and C1 dual-resolve gate"`
+- [x] **Step 4: Run pass** — `cargo test transform verify` → pass
+- [x] **Step 5: Commit** — `git commit -am "feat: file-level transform with line fail-closed and C1 dual-resolve gate"`
 
 ---
 

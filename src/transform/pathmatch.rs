@@ -71,6 +71,36 @@ pub fn normalize_text(input: &str, m: &PathMapper) -> NormalizedText {
     NormalizedText { text: out, spans }
 }
 
+/// Count the token occurrences `resolve_text` would consume in Verify mode.
+/// Mirrors the resolve scan exactly: `${ESC}` prefixes are copied through and
+/// never counted; registered `${NAME}` tokens skip their following run.
+pub(crate) fn count_resolvable_tokens(input: &str, m: &PathMapper) -> usize {
+    let mut count = 0usize;
+    let mut i = 0;
+    'outer: while i < input.len() {
+        if input[i..].starts_with(ESC) {
+            // copy-through, same as resolve_text
+        } else if input[i..].starts_with("${") {
+            for t in &m.tokens {
+                let tok = format!("${{{}}}", t.name);
+                if input[i..].starts_with(&tok) {
+                    count += 1;
+                    let run_start = i + tok.len();
+                    let mut run_end = run_start;
+                    for c in input[run_start..].chars() {
+                        if is_run_char(c) { run_end += c.len_utf8(); } else { break; }
+                    }
+                    i = run_end;
+                    continue 'outer;
+                }
+            }
+        }
+        let c = input[i..].chars().next().unwrap();
+        i += c.len_utf8();
+    }
+    count
+}
+
 pub fn resolve_text(input: &str, m: &PathMapper, mode: ResolveMode) -> String {
     let mut out = String::with_capacity(input.len());
     let mut span_idx = 0usize;
