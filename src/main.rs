@@ -50,8 +50,8 @@ fn main() {
     let result = match cli.cmd {
         Cmd::Init(opts) => cli::init::run_init(opts),
         Cmd::Push { dry_run, force } => cli::push::run_push(cli::push::PushOpts { dry_run, force }),
-        Cmd::Pull { .. } => Err(anyhow::anyhow!("pull is not implemented yet")),
-        Cmd::Status { .. } => Err(anyhow::anyhow!("status is not implemented yet")),
+        Cmd::Pull { dry_run, force } => cli::pull::run_pull(cli::pull::PullOpts { dry_run, force }),
+        Cmd::Status { offline } => cli::status::run_status(offline),
         Cmd::Gc { .. } => Err(anyhow::anyhow!("gc is not implemented yet")),
         Cmd::Rekey { .. } => Err(anyhow::anyhow!("rekey is not implemented yet")),
     };

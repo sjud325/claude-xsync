@@ -1,18 +1,13 @@
 use crate::cli::{
-    guard_running, load_keys, read_manifest, rel_to_portable, repo_dir, unix_now, write_manifest,
+    collect_locals, guard_running, load_keys, read_manifest, repo_dir, unix_now, write_manifest,
     Summary,
 };
 use crate::config;
 use crate::crypto::object_name;
 use crate::gitx::Git;
-use crate::manifest::{chunk_paths, split_chunks, Entry, EntryMode, Manifest};
+use crate::manifest::{chunk_paths, split_chunks, Entry, Manifest};
 use crate::mapper::PathMapper;
-use crate::scan::{scan, sha256_bytes};
-use crate::special::{mcp::extract_mcp, plugins::plugin_manifest_rels};
 use crate::state;
-use crate::transform::file::TransformOutcome;
-use crate::verify::push_gate;
-use std::collections::BTreeMap;
 
 pub struct PushOpts {
     pub dry_run: bool,
@@ -35,7 +30,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     }
 
     let keys = load_keys(&cfg, &repo)?;
-    let mut manifest = read_manifest(&repo, &keys)?;
+    let manifest = read_manifest(&repo, &keys)?;
     let mut st = state::load_state();
 
     // Guard A: remote moved past our anchor and the last push wasn't ours
@@ -51,44 +46,26 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
 
     let home = config::home_dir();
     let mapper = PathMapper::new(&home.to_string_lossy(), &cfg.path_map)?;
-
-    // Work list: scanned files + synthetic files (mcp subtree, plugin manifests)
-    let scanres = scan(&claude_dir, &cfg)?;
-    for u in &scanres.unknown {
+    let (locals, unknown) = collect_locals(&cfg, &claude_dir, &home, &mapper)?;
+    for u in &unknown {
         println!("⚠ unknown top-level entry not synced: {u} (add it to extra_paths in config.toml to sync)");
-    }
-    let mut items: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for (rel, path) in &scanres.files {
-        items.insert(rel_to_portable(rel, &mapper), std::fs::read(path)?);
-    }
-    for rel in plugin_manifest_rels(&claude_dir.join("plugins")) {
-        items.insert(rel.clone(), std::fs::read(claude_dir.join(&rel))?);
-    }
-    if let Ok(claude_json) = std::fs::read_to_string(home.join(".claude.json")) {
-        if let Some(subtree) = extract_mcp(&claude_json)? {
-            items.insert("_xsync/mcp-servers.json".into(), subtree.into_bytes());
-        }
     }
 
     let mut summary = Summary::new();
     let mut entries = manifest.as_ref().map(|m| m.entries.clone()).unwrap_or_default();
     let mut pending_state: Vec<(String, String)> = Vec::new();
 
-    for (portable, data) in &items {
-        let hash = sha256_bytes(data);
-        let unchanged = entries.get(portable).map(|e| e.plaintext_hash == hash).unwrap_or(false)
-            && st.files.get(portable) == Some(&hash);
+    for (portable, lf) in &locals {
+        let unchanged = st.files.get(portable) == Some(&lf.portable_hash)
+            && entries.get(portable).map(|e| e.plaintext_hash == lf.portable_hash).unwrap_or(false);
         if unchanged {
-            continue; // age is non-deterministic; plaintext hash is the identity
+            continue; // age is non-deterministic; the portable-payload hash is the identity
         }
-        let (payload, mode) = match push_gate(portable, data, &mapper) {
-            TransformOutcome::Transformed { data: t, .. } => (t, EntryMode::Transformed),
-            TransformOutcome::Verbatim { reason } => {
-                summary.verbatim += 1;
-                summary.verbatim_reasons.push(reason);
-                (data.clone(), EntryMode::Verbatim)
-            }
-        };
+        if let Some(reason) = &lf.verbatim_reason {
+            summary.verbatim += 1;
+            summary.verbatim_reasons.push(reason.clone());
+            println!("⚠ {portable}: stored verbatim ({reason})");
+        }
         if opts.dry_run {
             println!("would push {portable}");
             summary.synced += 1;
@@ -96,7 +73,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         }
         let object = object_name(&keys.hmac_key, portable);
         remove_object_files(&repo, &object)?;
-        let sealed = crate::crypto::seal(&payload, &keys.recipient);
+        let sealed = crate::crypto::seal(&lf.payload, &keys.recipient);
         let chunks = split_chunks(&sealed);
         for (chunk, rel) in chunks.iter().zip(chunk_paths(&object, chunks.len() as u32)) {
             crate::fsx::atomic_write(&repo.join(rel), chunk)?;
@@ -106,22 +83,18 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
             Entry {
                 object,
                 chunks: chunks.len() as u32,
-                plaintext_hash: hash.clone(),
-                size: data.len() as u64,
-                mode,
+                plaintext_hash: lf.portable_hash.clone(),
+                size: lf.payload.len() as u64,
+                mode: lf.mode,
             },
         );
-        pending_state.push((portable.clone(), hash));
+        pending_state.push((portable.clone(), lf.portable_hash.clone()));
         summary.synced += 1;
     }
 
     // Deletions: previously-synced portables that vanished locally
-    let mut deletions = Vec::new();
-    for portable in st.files.keys() {
-        if !items.contains_key(portable) {
-            deletions.push(portable.clone());
-        }
-    }
+    let deletions: Vec<String> =
+        st.files.keys().filter(|p| !locals.contains_key(*p)).cloned().collect();
     if !opts.dry_run {
         for portable in &deletions {
             if let Some(entry) = entries.remove(portable) {
@@ -131,22 +104,26 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     }
 
     if opts.dry_run {
+        for portable in &deletions {
+            println!("would delete {portable} from remote");
+        }
         summary.print();
         return Ok(summary.exit_code());
     }
 
     if summary.synced > 0 || !deletions.is_empty() {
-        let new_manifest = Manifest {
-            version: 1,
-            last_push_device: cfg.device.clone(),
-            last_push_ts: unix_now(),
-            entries,
-        };
-        write_manifest(&repo, &keys, &new_manifest)?;
+        write_manifest(
+            &repo,
+            &keys,
+            &Manifest {
+                version: 1,
+                last_push_device: cfg.device.clone(),
+                last_push_ts: unix_now(),
+                entries,
+            },
+        )?;
         git.commit_all(&format!("xsync push from {}", cfg.device))?;
         git.push()?;
-        manifest = Some(new_manifest);
-        let _ = manifest; // manifest now reflects the pushed state
 
         st.last_synced_commit = Some(git.head()?);
         for portable in &deletions {

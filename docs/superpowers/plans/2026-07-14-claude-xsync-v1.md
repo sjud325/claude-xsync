@@ -1078,7 +1078,7 @@ fn guard_a_blocks_out_of_order_push() { /* dev_b pushes first; dev_a push → ex
   - Apply: `backup_files` for to-be-replaced + to-be-deleted rels → atomic_write each (dirkey resolution via `portable_to_key` for `projects/` segments) → both-modified: write remote, save local as `<path>.xsync-conflict.<unix_ts>`; `history.jsonl` → `union_jsonl` result instead → mcp synthetic → `merge_mcp` into real `.claude.json` → remote-deleted → move into backup dir → `upsert_and_save` state per file.
 - `status`: fetch (skip on `--offline`), decrypt manifest, print to-push / to-pull / conflicts counts, last push device+time.
 
-- [ ] **Step 1: Failing e2e tests**
+- [x] **Step 1: Failing e2e tests**
 
 ```rust
 #[test]
@@ -1103,8 +1103,8 @@ fn verbatim_mode_files_skip_resolve() { /* push a file that push_gate degrades (
 fn squash_recovery() { /* A: gc --squash (Task 13 stub: direct git force-push here) → B: pull → exit 0, files intact */ }
 ```
 
-- [ ] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: classified pull with conflict preservation and status"`
+- [x] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: classified pull with conflict preservation and status"`
 
 ---
 
@@ -1176,6 +1176,7 @@ Not tasks — a manual gate before calling v1 done, run on the actual Loki machi
 - **Task 2 test literal**: the plan's `handles_escapes_and_unicode` test used `br#"...한글..."#` — Rust forbids non-ASCII in raw *byte* string literals (compile error). Replaced with the byte-identical `r#"..."#.as_bytes()`. Semantics unchanged.
 - **Task 6 age Identity construction**: age 0.10 has no public raw-scalar constructor (`Identity` only offers `generate()` and bech32 `FromStr`; verified in crate source). Added the `bech32 = "0.9"` dependency (already in age's own tree) to encode the clamped scalar as `age-secret-key-…` and parse it. Derivation itself is exactly as planned (Argon2id 64B split).
 - **Task 11 deps/config**: added `getrandom = "0.2"` (already in age's tree) — the plan's dependency list had no RNG for the random 32-byte salt. Added `Config.passphrase_env: Option<String>` (serde-default) so non-interactive commands know which env var carries the passphrase; the plan's `--passphrase-env` init flag implies persisting it.
+- **Task 12 hash semantics**: `plaintext_hash` (manifest) and the `state.json` hashes are defined as sha256 of the **portable payload** (the plaintext that gets sealed), not of the raw local bytes. Raw bytes legitimately differ across devices (paths are rewritten), so raw-byte hashes would make every pulled file look "changed" forever and ping-pong no-op syncs between devices; the portable payload is byte-identical on both devices whenever content is in sync (guaranteed by the pull reverse-verify gate). Spec/plan wording ("평문 해시") is preserved — the portable payload *is* the plaintext of the sealed object.
 - **Task 2 proptest oracle**: reproduced failure `minimal failing input: k = "z"`. `json!({k: v, "z": [...]})` collapses to one key when `k == "z"`, so the hardcoded expectation `[k, v, "z", v]` contradicts the oracle's own statement ("the strings serde sees"). Fixed with `prop_assume!(k != "z")` (degenerate-input exclusion, not a weakening — the lexer output was correct). Additionally, default `serde_json` sorts keys (BTreeMap), breaking the expected document order whenever `k > "z"`; enabled the `preserve_order` feature at Task 2 instead of Task 10 (Task 10 mandates it anyway).
 
 ### Deviation from spec

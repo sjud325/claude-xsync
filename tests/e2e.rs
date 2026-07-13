@@ -63,6 +63,7 @@ impl TestEnv {
         )
         .unwrap();
         fs::write(dev_a.claude().join("settings.json"), b"{\"model\":\"opus\"}").unwrap();
+        fs::write(dev_a.claude().join("history.jsonl"), b"{\"display\":\"cmd-a\"}\n").unwrap();
 
         // dev_b: different settings
         fs::create_dir_all(dev_b.claude()).unwrap();
@@ -117,6 +118,145 @@ fn init_and_first_push_populates_remote() {
     let (code2, out2) = run(&env.dev_a, &["push"]);
     assert_eq!(code2, 0, "second push failed: {out2}");
     assert!(out2.contains("✓ 0 synced"), "expected no-op summary: {out2}");
+}
+
+fn find_conflict_file(dir: &std::path::Path, base: &str) -> Option<PathBuf> {
+    fs::read_dir(dir).ok()?.flatten().find_map(|e| {
+        let name = e.file_name().to_string_lossy().to_string();
+        name.starts_with(&format!("{base}.xsync-conflict.")).then(|| e.path())
+    })
+}
+
+fn git_in(repo: &std::path::Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn full_cross_device_roundtrip_with_path_rewrite() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // projects dir renamed to dev_b's encoded home
+    let proj = env.dev_b.claude().join(format!("projects/{}-ws-app", env.dev_b.enc_home()));
+    let content = fs::read_to_string(proj.join("s.jsonl")).unwrap();
+    assert!(
+        content.contains(&format!("{}/ws/app", env.dev_b.home_str())),
+        "cwd not rewritten to dev_b home: {content}"
+    );
+    assert!(!content.contains(&env.dev_a.home_str()), "dev_a home leaked: {content}");
+}
+
+#[test]
+fn forgot_push_scenario_c3_no_deadlock_no_loss() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // B: edit settings + append a history line, push
+    fs::write(env.dev_b.claude().join("settings.json"), b"{\"model\":\"haiku\"}").unwrap();
+    let mut hb = fs::read(env.dev_b.claude().join("history.jsonl")).unwrap();
+    hb.extend_from_slice(b"{\"display\":\"cmd-b\"}\n");
+    fs::write(env.dev_b.claude().join("history.jsonl"), &hb).unwrap();
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // A forgot to push: local-only new file + modified history + modified settings
+    fs::write(env.dev_a.claude().join("CLAUDE.md"), b"# my rules\n").unwrap();
+    let mut ha = fs::read(env.dev_a.claude().join("history.jsonl")).unwrap();
+    ha.extend_from_slice(b"{\"display\":\"cmd-a2\"}\n");
+    fs::write(env.dev_a.claude().join("history.jsonl"), &ha).unwrap();
+    fs::write(env.dev_a.claude().join("settings.json"), b"{\"model\":\"opus-4.8\"}").unwrap();
+
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "pull must complete: {o}");
+
+    // local-only new file preserved
+    assert_eq!(fs::read(env.dev_a.claude().join("CLAUDE.md")).unwrap(), b"# my rules\n");
+    // history = line union (remote lines + local-only lines)
+    let h = fs::read_to_string(env.dev_a.claude().join("history.jsonl")).unwrap();
+    for needle in ["cmd-a", "cmd-b", "cmd-a2"] {
+        assert!(h.contains(needle), "history union missing {needle}: {h}");
+    }
+    // settings = remote version, local version kept as conflict copy
+    assert_eq!(fs::read(env.dev_a.claude().join("settings.json")).unwrap(), b"{\"model\":\"haiku\"}");
+    let conflict = find_conflict_file(&env.dev_a.claude(), "settings.json")
+        .expect("conflict copy must exist");
+    assert_eq!(fs::read(conflict).unwrap(), b"{\"model\":\"opus-4.8\"}");
+}
+
+#[test]
+fn verbatim_mode_files_skip_resolve() {
+    let env = TestEnv::new();
+    // unknown-format file: bytes must survive the round trip untouched
+    let payload = format!("BIN\x00 {}/ws/app \x01", env.dev_a.home_str()).into_bytes();
+    fs::create_dir_all(env.dev_a.claude().join("skills")).unwrap();
+    fs::write(env.dev_a.claude().join("skills/tool.bin"), &payload).unwrap();
+
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 1, "verbatim degrade is a warning exit: {o}");
+    assert!(o.contains("verbatim"), "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("skills/tool.bin")).unwrap(),
+        payload,
+        "verbatim file must be byte-identical (no resolve applied)"
+    );
+}
+
+#[test]
+fn squash_recovery() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // two more pushes from A
+    for v in ["v1", "v2"] {
+        fs::write(env.dev_a.claude().join("settings.json"), format!("{{\"model\":\"{v}\"}}")).unwrap();
+        let (c, o) = run(&env.dev_a, &["push"]);
+        assert_eq!(c, 0, "{o}");
+    }
+
+    // squash history (Task 13 stub: direct git force-push here)
+    let repo = env.dev_a.xsync().join("repo");
+    git_in(&repo, &["checkout", "--orphan", "xsync-squash"]);
+    git_in(&repo, &["add", "-A"]);
+    git_in(&repo, &["commit", "-m", "squash"]);
+    git_in(&repo, &["branch", "-M", "main"]);
+    git_in(&repo, &["push", "--force", "origin", "main"]);
+
+    // B pull auto-recovers from the rewritten history
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "divergence recovery must be automatic: {o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"v2\"}"
+    );
 }
 
 #[test]
