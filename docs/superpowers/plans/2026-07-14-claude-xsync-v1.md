@@ -1,6 +1,6 @@
 # claude-xsync v1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use markdown checkbox syntax for tracking (all checked = complete).
 
 **Goal:** Cross-platform (macOS ↔ native Windows) Claude Code state sync CLI over an encrypted private git repo, with span-splicing path normalization that survives username/OS/separator/case differences.
 
