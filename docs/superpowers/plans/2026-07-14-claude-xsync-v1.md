@@ -1012,9 +1012,9 @@ pub fn union_jsonl(local: &[u8], remote: &[u8]) -> Vec<u8>
 //   exact byte lines as units; trailing partial line of each input preserved at end.
 ```
 
-- [ ] **Step 1: Failing tests** — mcp: extract from fixture JSON with 70 sibling keys returns only subtree; merge into a different claude_json keeps siblings (`userID` etc.) intact and replaces `mcpServers`; roundtrip idempotent. history: overlapping JSONL byte-lines union with no duplicates, remote-first order. plugins: tempdir with `config.json` file + `cache/` dir → only `plugins/config.json` returned.
-- [ ] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: mcp subtree extract/merge, plugin manifest filter, history union"`
+- [x] **Step 1: Failing tests** — mcp: extract from fixture JSON with 70 sibling keys returns only subtree; merge into a different claude_json keeps siblings (`userID` etc.) intact and replaces `mcpServers`; roundtrip idempotent. history: overlapping JSONL byte-lines union with no duplicates, remote-first order. plugins: tempdir with `config.json` file + `cache/` dir → only `plugins/config.json` returned.
+- [x] **Step 2: Run fail**, **Step 3: Implement**, **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: mcp subtree extract/merge, plugin manifest filter, history union"`
 
 ---
 

@@ -6,6 +6,7 @@ pub mod procguard;
 pub mod manifest;
 pub mod mapper;
 pub mod scan;
+pub mod special;
 pub mod state;
 pub mod transform;
 pub mod verify;
