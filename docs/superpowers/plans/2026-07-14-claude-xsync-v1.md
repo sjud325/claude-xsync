@@ -940,9 +940,9 @@ pub fn sha256_file(p: &Path) -> anyhow::Result<String>
 ```
 - `plugins` and `.claude.json` are in EXCLUDED here because Task 10 handles them as synthetic files; scanner itself never walks them. Unknown = top-level entries in neither list nor `removed_paths`.
 
-- [ ] **Step 1: Failing tests** — use `tempfile::tempdir()` as fake claude_dir: create `projects/a/s.jsonl`, `settings.json`, `ide/x`, `weird-new-dir/f`; assert scan returns exactly the two allowlisted rel paths with `/` separators and `unknown == ["weird-new-dir"]`. State upsert writes file immediately (read back from disk in test).
-- [ ] **Step 2: Run fail**, **Step 3: Implement** (walk with `std::fs`, recurse allowlisted dirs; skip symlinks), **Step 4: Run pass**
-- [ ] **Step 5: Commit** — `git commit -am "feat: config/state/scanner with allowlist and unknown detection"`
+- [x] **Step 1: Failing tests** — use `tempfile::tempdir()` as fake claude_dir: create `projects/a/s.jsonl`, `settings.json`, `ide/x`, `weird-new-dir/f`; assert scan returns exactly the two allowlisted rel paths with `/` separators and `unknown == ["weird-new-dir"]`. State upsert writes file immediately (read back from disk in test).
+- [x] **Step 2: Run fail**, **Step 3: Implement** (walk with `std::fs`, recurse allowlisted dirs; skip symlinks), **Step 4: Run pass**
+- [x] **Step 5: Commit** — `git commit -am "feat: config/state/scanner with allowlist and unknown detection"`
 
 ---
 
