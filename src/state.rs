@@ -21,12 +21,8 @@ pub fn load_state() -> State {
 }
 
 pub fn save_state(state: &State) -> anyhow::Result<()> {
-    let p = state_path();
-    if let Some(parent) = p.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&p, serde_json::to_vec_pretty(state)?)?;
-    Ok(())
+    // atomic: a crash mid-write must never leave a truncated state.json
+    crate::fsx::atomic_write(&state_path(), &serde_json::to_vec_pretty(state)?)
 }
 
 /// Per-file immediate write — interrupted pulls resume exactly where they stopped.

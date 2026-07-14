@@ -75,8 +75,18 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     let mut st = state::load_state();
 
     if re_anchor {
-        // Re-key state from the fresh manifest: files already matching the
-        // remote get anchored, everything else falls to classification.
+        // History was force-rewritten. Drop every anchor the fresh manifest
+        // does not corroborate: if this device's push lost a race against the
+        // rewrite, its content then classifies as both-modified (conflict
+        // copy) instead of "remote-only changed" (silent revert). Review I3.
+        st.files.retain(|portable, hash| {
+            manifest
+                .entries
+                .get(portable)
+                .map(|e| &e.plaintext_hash == hash)
+                .unwrap_or(false)
+        });
+        // Files already matching the rewritten remote get anchored directly.
         for (portable, entry) in &manifest.entries {
             if locals.get(portable).map(|l| &l.portable_hash) == Some(&entry.plaintext_hash) {
                 st.files

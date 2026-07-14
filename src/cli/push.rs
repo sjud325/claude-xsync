@@ -67,6 +67,21 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         if unchanged {
             continue; // age is non-deterministic; the portable-payload hash is the identity
         }
+        // Never overwrite a manifest entry that moved past our anchor — the
+        // remote version is newer than what this device last synced (e.g. a
+        // pull skipped it). Overwriting would silently regress the peer's
+        // data; resolving is pull's job (conflict copies). Review C1.
+        if let Some(e) = entries.get(portable) {
+            if e.plaintext_hash != lf.portable_hash
+                && st.files.get(portable) != Some(&e.plaintext_hash)
+            {
+                println!(
+                    "✗ {portable}: changed on the remote since this device last synced it — run `claude-xsync pull` first"
+                );
+                summary.skipped += 1;
+                continue;
+            }
+        }
         if let Some(reason) = &lf.verbatim_reason {
             summary.verbatim += 1;
             summary.verbatim_reasons.push(reason.clone());
@@ -98,13 +113,24 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         summary.synced += 1;
     }
 
-    // Deletions: previously-synced portables that vanished locally
-    let deletions: Vec<String> = st
-        .files
-        .keys()
-        .filter(|p| !locals.contains_key(*p))
-        .cloned()
-        .collect();
+    // Deletions: previously-synced portables that vanished locally.
+    // Same staleness guard as above: if the remote changed the file after our
+    // anchor, deleting it here would destroy the peer's newer data (review C1).
+    let mut deletions: Vec<String> = Vec::new();
+    for (portable, anchored_hash) in &st.files {
+        if locals.contains_key(portable) {
+            continue;
+        }
+        match entries.get(portable) {
+            Some(e) if e.plaintext_hash != *anchored_hash => {
+                println!(
+                    "✗ {portable}: deleted locally but changed on the remote — run `claude-xsync pull` first"
+                );
+                summary.skipped += 1;
+            }
+            _ => deletions.push(portable.clone()),
+        }
+    }
     if !opts.dry_run {
         for portable in &deletions {
             if let Some(entry) = entries.remove(portable) {

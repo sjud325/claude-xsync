@@ -369,6 +369,207 @@ fn rekey_reencrypts_and_squashes_old_key_out() {
 }
 
 #[test]
+fn pull_skip_must_not_cascade_into_push_clobber() {
+    // Review C1: a file the puller cannot stage (reverse-verify fails because
+    // it quotes the puller's own home) must not let the puller's next push
+    // overwrite the newer remote version with its stale local copy.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let rel = "plans/notes.jsonl";
+    fs::create_dir_all(env.dev_a.claude().join("plans")).unwrap();
+    fs::write(env.dev_a.claude().join(rel), b"{\"note\":\"v1 plain\"}\n").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}"); // v1 lands on B
+
+    // A rewrites the file quoting B's home (unstageable on B) + adds new data
+    let v2 = format!(
+        "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"IMPORTANT-V2\"}}\n",
+        env.dev_b.home_str()
+    );
+    fs::write(env.dev_a.claude().join(rel), v2.as_bytes()).unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // B pull: that file is skipped (exit 1), B keeps v1 locally
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 1, "expected skip warning exit: {o}");
+    assert!(o.contains("skipping"), "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join(rel)).unwrap(),
+        b"{\"note\":\"v1 plain\"}\n"
+    );
+
+    // B pushes an unrelated edit — it must NOT clobber the newer remote file
+    fs::write(
+        env.dev_b.claude().join("settings.json"),
+        b"{\"model\":\"b-edit\"}",
+    )
+    .unwrap();
+    let (_, o) = run(&env.dev_b, &["push"]);
+    assert!(!o.contains("panicked"), "push must not crash: {o}");
+
+    // A pull: A's newer content must survive the round trip
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let after = fs::read_to_string(env.dev_a.claude().join(rel)).unwrap();
+    assert!(
+        after.contains("IMPORTANT-V2"),
+        "newer remote content was clobbered by a stale push: {after}"
+    );
+}
+
+#[test]
+fn rekey_on_stale_device_aborts_with_pull_hint() {
+    // Review C2: rekey rebuilds the manifest from LOCAL plaintext and purges
+    // history — running it on a device that hasn't pulled the peer's latest
+    // push would destroy that data. It must abort like guard A.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // B pushes new data that A has not pulled
+    fs::write(
+        env.dev_b.claude().join("settings.json"),
+        b"{\"model\":\"b-only\"}",
+    )
+    .unwrap();
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // stale A: rekey must refuse
+    let (c, o) = run_env(
+        &env.dev_a,
+        &["rekey"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 2, "stale rekey must abort: {o}");
+    assert!(o.contains("pull"), "expected pull hint: {o}");
+    // history untouched, old passphrase still valid
+    assert_ne!(bare_commit_count(&env), "1");
+    let (c, o) = run(&env.dev_b, &["status"]);
+    assert_eq!(c, 0, "old passphrase must still work: {o}");
+
+    // after pulling, rekey goes through
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run_env(
+        &env.dev_a,
+        &["rekey"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 0, "anchored rekey must succeed: {o}");
+    assert_eq!(bare_commit_count(&env), "1");
+}
+
+#[test]
+fn history_rewrite_race_preserves_local_as_conflict() {
+    // Review I3: if a device's push loses a race against a peer's squash
+    // force-push, its content must surface as a conflict copy on the next
+    // pull — never a silent revert.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    let pre = {
+        let out = Command::new("git")
+            .args(["rev-parse", "main"])
+            .current_dir(env.bare.path())
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    // B pushes v2
+    fs::write(
+        env.dev_b.claude().join("settings.json"),
+        b"{\"model\":\"b-v2\"}",
+    )
+    .unwrap();
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // simulate a peer squash based on `pre`, force-pushed AFTER B's push
+    let racer = TempDir::new().unwrap();
+    let racer_repo = racer.path().join("clone");
+    for args in [
+        vec!["clone", &env.bare_url(), racer_repo.to_str().unwrap()],
+        vec![
+            "-C",
+            racer_repo.to_str().unwrap(),
+            "reset",
+            "--hard",
+            pre.as_str(),
+        ],
+        vec![
+            "-C",
+            racer_repo.to_str().unwrap(),
+            "checkout",
+            "--orphan",
+            "raced",
+        ],
+        vec!["-C", racer_repo.to_str().unwrap(), "add", "-A"],
+        vec![
+            "-C",
+            racer_repo.to_str().unwrap(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-m",
+            "raced-squash",
+        ],
+        vec!["-C", racer_repo.to_str().unwrap(), "branch", "-M", "main"],
+        vec![
+            "-C",
+            racer_repo.to_str().unwrap(),
+            "push",
+            "--force",
+            "origin",
+            "main",
+        ],
+    ] {
+        let out = Command::new("git").args(&args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    // B pull: rewritten remote wins the file, but B's v2 must survive visibly
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"opus\"}"
+    );
+    let mut found = false;
+    for e in fs::read_dir(env.dev_b.claude()).unwrap().flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if name.starts_with("settings.json.xsync-conflict.") {
+            let body = fs::read(e.path()).unwrap();
+            if body == b"{\"model\":\"b-v2\"}" {
+                found = true;
+            }
+        }
+    }
+    assert!(found, "b-v2 must be preserved as a conflict copy: {o}");
+}
+
+#[test]
 fn guard_a_blocks_out_of_order_push() {
     let env = TestEnv::new();
     let (code, out) = env.init(&env.dev_a);

@@ -20,6 +20,17 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
     let repo = repo_dir();
     let git = Git::clone_or_open(&cfg.remote, &repo)?;
     git.fetch()?;
+    // Guard (review C2): rekey rebuilds the manifest from LOCAL plaintext and
+    // purges history — anything the peer pushed that this device never pulled
+    // would be destroyed and unrecoverable. Require a fully-pulled anchor.
+    let anchored_state = state::load_state();
+    if let Some(rh) = git.remote_head()? {
+        if anchored_state.last_synced_commit.as_deref() != Some(rh.as_str()) {
+            anyhow::bail!(
+                "remote has commits this device hasn't pulled — run `claude-xsync pull` first, then rekey"
+            );
+        }
+    }
     if git.diverged()? {
         git.reset_hard_origin()?;
     } else {

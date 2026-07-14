@@ -7,13 +7,19 @@ pub struct UnmappedToken(pub String);
 
 pub fn key_to_portable(seg: &str, m: &PathMapper) -> String {
     for t in &m.tokens {
+        // enc_local is ASCII by construction (encode_claude_path), so ASCII
+        // case-insensitive prefix matching is exact — and unlike a
+        // to_lowercase() comparison it cannot shift byte offsets on
+        // multi-byte case-folding input (U+212A et al.) and panic on slicing.
         let enc = &t.enc_local;
-        let seg_l = seg.to_lowercase();
-        let enc_l = enc.to_lowercase();
-        if seg_l == enc_l {
+        if seg.eq_ignore_ascii_case(enc) {
             return format!("${{{}}}", t.name);
         }
-        if seg_l.starts_with(&format!("{enc_l}-")) {
+        if seg.len() > enc.len()
+            && seg.is_char_boundary(enc.len())
+            && seg[..enc.len()].eq_ignore_ascii_case(enc)
+            && seg.as_bytes()[enc.len()] == b'-'
+        {
             return format!("${{{}}}{}", t.name, &seg[enc.len()..]);
         }
     }
@@ -77,6 +83,14 @@ mod tests {
     #[test]
     fn case_insensitive_key_match() {
         assert_eq!(key_to_portable("C--users-loki-ws", &win()), "${HOME}-ws");
+    }
+
+    #[test]
+    fn multibyte_casefold_key_no_panic_no_match() {
+        // U+212A (KELVIN SIGN) lowercases to ASCII 'k', shrinking the byte
+        // length — must neither panic on a byte slice nor match.
+        let seg = "C--Users-Lo\u{212A}i-ws";
+        assert_eq!(key_to_portable(seg, &win()), seg);
     }
 
     #[test]
