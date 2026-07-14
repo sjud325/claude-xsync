@@ -71,7 +71,7 @@ impl TestEnv {
             proj.join("s.jsonl"),
             format!(
                 "{{\"cwd\":\"{}/ws/app\",\"type\":\"user\"}}\n",
-                dev_a.home_str()
+                json_escape(&dev_a.home_str())
             ),
         )
         .unwrap();
@@ -119,6 +119,17 @@ impl TestEnv {
 
 pub fn run(dev: &FakeDevice, args: &[&str]) -> (i32, String) {
     run_env(dev, args, &[])
+}
+
+/// Escape a path for embedding inside a JSON string literal — Windows homes
+/// contain backslashes, which are JSON escape characters.
+pub fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+}
+
+/// The forward-slash form pull-resolve emits on every OS.
+pub fn slash_form(s: &str) -> String {
+    s.replace('\\', "/")
 }
 
 pub fn run_env(dev: &FakeDevice, args: &[&str], extra_env: &[(&str, &str)]) -> (i32, String) {
@@ -188,12 +199,14 @@ fn full_cross_device_roundtrip_with_path_rewrite() {
         .claude()
         .join(format!("projects/{}-ws-app", env.dev_b.enc_home()));
     let content = fs::read_to_string(proj.join("s.jsonl")).unwrap();
+    // pull-resolve emits the forward-slash form on every OS
     assert!(
-        content.contains(&format!("{}/ws/app", env.dev_b.home_str())),
+        content.contains(&format!("{}/ws/app", slash_form(&env.dev_b.home_str()))),
         "cwd not rewritten to dev_b home: {content}"
     );
     assert!(
-        !content.contains(&env.dev_a.home_str()),
+        !content.contains(&env.dev_a.home_str())
+            && !content.contains(&slash_form(&env.dev_a.home_str())),
         "dev_a home leaked: {content}"
     );
 }
@@ -328,7 +341,7 @@ fn quoted_peer_home_absorbed_once_and_syncs() {
     let rel = "plans/quoted.jsonl";
     let original = format!(
         "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"DATA-KEEP\"}}\n",
-        env.dev_b.home_str()
+        json_escape(&env.dev_b.home_str())
     );
     fs::create_dir_all(env.dev_a.claude().join("plans")).unwrap();
     fs::write(env.dev_a.claude().join(rel), original.as_bytes()).unwrap();
@@ -355,7 +368,7 @@ fn quoted_peer_home_absorbed_once_and_syncs() {
     assert_eq!(c, 0, "{o}");
     let after = fs::read_to_string(env.dev_a.claude().join(rel)).unwrap();
     assert!(
-        after.contains(&format!("{}/x", env.dev_a.home_str())),
+        after.contains(&format!("{}/x", slash_form(&env.dev_a.home_str()))),
         "morph: {after}"
     );
     assert!(after.contains("DATA-KEEP"), "{after}");
@@ -364,6 +377,48 @@ fn quoted_peer_home_absorbed_once_and_syncs() {
     let (c, o) = run(&env.dev_a, &["push"]);
     assert_eq!(c, 0, "{o}");
     assert!(o.contains("✓ 0 synced"), "must be a fixpoint now: {o}");
+}
+
+#[test]
+fn variant_case_quote_absorbs_with_canonicalization() {
+    // Spec §12.2: absorption requires the RE-TOKENIZED form to be a fixpoint,
+    // not byte-identity of the quote itself — so case/separator variants of
+    // the peer home also absorb (intact on first hop, canonicalized after).
+    // This is what makes backslash-form Windows quotes sync on the real
+    // Windows machine.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let rel = "plans/case-variant.jsonl";
+    let original = format!(
+        "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"CASE-KEEP\"}}\n",
+        json_escape(&env.dev_b.home_str().to_uppercase())
+    );
+    fs::create_dir_all(env.dev_a.claude().join("plans")).unwrap();
+    fs::write(env.dev_a.claude().join(rel), original.as_bytes()).unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "variant-case quote must absorb: {o}");
+    assert!(o.contains("absorbed"), "expected absorption notice: {o}");
+    assert_eq!(
+        fs::read_to_string(env.dev_b.claude().join(rel)).unwrap(),
+        original,
+        "first hop stays byte-intact"
+    );
+
+    // round trip canonicalizes the quote's case
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let after = fs::read_to_string(env.dev_a.claude().join(rel)).unwrap();
+    assert!(
+        after.contains(&format!("{}/x", slash_form(&env.dev_a.home_str()))),
+        "canonicalized morph: {after}"
+    );
+    assert!(after.contains("CASE-KEEP"), "{after}");
 }
 
 #[test]
@@ -418,9 +473,9 @@ fn rekey_reencrypts_and_squashes_old_key_out() {
 
 #[test]
 fn pull_skip_must_not_cascade_into_push_clobber() {
-    // Review C1: a file the puller cannot stage (reverse-verify fails because
-    // it quotes the puller's own home) must not let the puller's next push
-    // overwrite the newer remote version with its stale local copy.
+    // Review C1: a file the puller cannot stage (here: object corrupted on
+    // the remote) must not let the puller's next push overwrite the newer
+    // remote version with its stale local copy.
     let env = TestEnv::new();
     assert_eq!(env.init(&env.dev_a).0, 0);
     let rel = "plans/notes.jsonl";
@@ -433,16 +488,52 @@ fn pull_skip_must_not_cascade_into_push_clobber() {
     let (c, o) = run(&env.dev_b, &["pull"]);
     assert_eq!(c, 0, "{o}"); // v1 lands on B
 
-    // A rewrites the file quoting B's home in NON-CANONICAL case — C′ still
-    // skips this (re-tokenizing can't reproduce the original case), which is
-    // exactly the skip we need to exercise the push guard.
-    let v2 = format!(
-        "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"IMPORTANT-V2\"}}\n",
-        env.dev_b.home_str().to_uppercase()
-    );
-    fs::write(env.dev_a.claude().join(rel), v2.as_bytes()).unwrap();
+    // A pushes a newer v2
+    let v2 = b"{\"note\":\"v2\"}\n{\"note\":\"IMPORTANT-V2\"}\n";
+    fs::write(env.dev_a.claude().join(rel), v2).unwrap();
     let (c, o) = run(&env.dev_a, &["push"]);
     assert_eq!(c, 0, "{o}");
+
+    // corrupt every object on the remote so B's staging of v2 fails
+    let tmp = TempDir::new().unwrap();
+    let clone = tmp.path().join("clone");
+    let clone_s = clone.to_string_lossy().to_string();
+    let out = Command::new("git")
+        .args(["clone", &env.bare_url(), clone_s.as_str()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for e in fs::read_dir(clone.join("objects")).unwrap().flatten() {
+        let mut bytes = fs::read(e.path()).unwrap();
+        bytes.extend_from_slice(b"CORRUPT");
+        fs::write(e.path(), bytes).unwrap();
+    }
+    for args in [
+        vec!["-C", clone_s.as_str(), "add", "-A"],
+        vec![
+            "-C",
+            clone_s.as_str(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-m",
+            "tamper",
+        ],
+        vec!["-C", clone_s.as_str(), "push", "origin", "main"],
+    ] {
+        let out = Command::new("git").args(&args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
 
     // B pull: that file is skipped (exit 1), B keeps v1 locally
     let (c, o) = run(&env.dev_b, &["pull"]);

@@ -124,9 +124,10 @@ unknown top-level entries are reported, never silently synced.
   *own* home forms, so a peer-home path quoted in conversation text arrives
   intact on the peer, then becomes a live (translating) path from the next
   push on (reported as `absorbed` during pull). Machine-consumed paths (cwd,
-  checkpoint keys) are unaffected throughout. Non-canonical-case quotes that
-  can't absorb losslessly are skipped instead (fail-closed). If you need
-  permanent quote fidelity, that is the v2 peer-home registry (spec §11).
+  checkpoint keys) are unaffected throughout. Case/separator variants of the
+  quote absorb too and canonicalize over subsequent hops; genuinely damaged
+  content still fails closed (skipped). If you need permanent quote fidelity,
+  that is the v2 peer-home registry (spec §11).
 - **Left-boundary residual**: paths under a different root that embed a home
   shape (e.g. `/mnt/backup/Users/<name>/…`) still translate, because a
   preceding separator is allowed — that is what keeps `file:///…` and `\\?\…`

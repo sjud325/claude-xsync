@@ -278,6 +278,27 @@ git commit -m "feat: one-step-stability pull gate absorbs quoted peer-home text 
 
 ---
 
+## Deviations discovered during implementation (Windows CI evidence)
+
+- **Harness bug, not product bug**: the e2e harness embedded raw home paths
+  inside JSON string literals; Windows homes contain backslashes → invalid
+  JSON → the product correctly fail-closed (line verbatim) and the roundtrip
+  assertion failed on windows-latest. Fixed with `json_escape` in the harness
+  and slash-form assertion needles (`slash_form`) since pull-resolve emits
+  forward slashes on every OS.
+- **C′ check relaxed from byte-identity to d2 self-fixpoint**: the planned
+  `resolve_pull(d2) == resolved` comparison can never hold for backslash-form
+  quotes on Windows (pull emits slash form), which would have blocked the
+  primary mac→win direction entirely. The shipped check is
+  `normalize(resolve_pull(d2)) == d2` — convergence is still proven, first
+  hop stays byte-intact, later hops canonicalize case/separators. Spec §12.2
+  updated accordingly.
+- **C1 regression trigger switched again**: under the relaxed check the
+  non-canonical-case quote absorbs (by design), so the skip trigger is now
+  remote object corruption — a skip class that always exists. A new
+  `variant_case_quote_absorbs_with_canonicalization` e2e pins the relaxed
+  semantics.
+
 ## Self-review notes
 
 - Spec coverage: §12.1 → Task 1; §12.2 (gate rule, absorption semantics, README/CLAUDE.md guidance) → Task 2. §12.2's "알림" is the `absorbed` println asserted in the e2e test.

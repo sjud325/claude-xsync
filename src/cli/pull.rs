@@ -323,11 +323,18 @@ fn stage_entry(
                 TransformOutcome::Transformed { data: d2, .. } => {
                     // One-step stability (spec §12.2, decision C′): quoted
                     // peer-home text re-tokenizes under THIS device's mapper.
-                    // That is absorption, not corruption — but only if the
-                    // absorbed form is already a fixpoint; anything else is
-                    // treated as damage and skipped.
+                    // That is absorption, not corruption — provided the
+                    // re-tokenized form is its own round-trip fixpoint
+                    // (normalize(resolve(d2)) == d2). Byte-comparing against
+                    // `resolved` would be too strict: pull emits the slash
+                    // form, so backslash/case variants of the quote would
+                    // never absorb on Windows even though they converge.
                     let stable = resolve_file_pull(portable, &d2, mapper)
-                        .map(|r2| r2 == resolved)
+                        .ok()
+                        .map(|r2| match normalize_file(portable, &r2, mapper) {
+                            TransformOutcome::Transformed { data, .. } => data == d2,
+                            TransformOutcome::Verbatim { .. } => false,
+                        })
                         .unwrap_or(false);
                     if stable {
                         println!(
