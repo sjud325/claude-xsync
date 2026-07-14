@@ -319,6 +319,54 @@ fn squash_recovery() {
 }
 
 #[test]
+fn quoted_peer_home_absorbed_once_and_syncs() {
+    // Spec §12.2 (C′): a session quoting the peer's home (canonical case)
+    // syncs to that peer; the quote is absorbed as a live path exactly once,
+    // after which everything is a stable fixpoint.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let rel = "plans/quoted.jsonl";
+    let original = format!(
+        "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"DATA-KEEP\"}}\n",
+        env.dev_b.home_str()
+    );
+    fs::create_dir_all(env.dev_a.claude().join("plans")).unwrap();
+    fs::write(env.dev_a.claude().join(rel), original.as_bytes()).unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // B pull: file APPLIES (no skip) with the quote byte-intact, plus notice
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "pull must apply the quoted file: {o}");
+    assert!(o.contains("absorbed"), "expected absorption notice: {o}");
+    assert_eq!(
+        fs::read_to_string(env.dev_b.claude().join(rel)).unwrap(),
+        original,
+        "quote must arrive byte-intact on first hop"
+    );
+
+    // B push: re-normalization tokenizes the absorbed quote and converges
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // A pull: the quote has morphed ONCE into A's live home; data intact
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let after = fs::read_to_string(env.dev_a.claude().join(rel)).unwrap();
+    assert!(
+        after.contains(&format!("{}/x", env.dev_a.home_str())),
+        "morph: {after}"
+    );
+    assert!(after.contains("DATA-KEEP"), "{after}");
+
+    // converged: both sides now no-op
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("✓ 0 synced"), "must be a fixpoint now: {o}");
+}
+
+#[test]
 fn rekey_reencrypts_and_squashes_old_key_out() {
     let env = TestEnv::new();
     assert_eq!(env.init(&env.dev_a).0, 0);
@@ -385,10 +433,12 @@ fn pull_skip_must_not_cascade_into_push_clobber() {
     let (c, o) = run(&env.dev_b, &["pull"]);
     assert_eq!(c, 0, "{o}"); // v1 lands on B
 
-    // A rewrites the file quoting B's home (unstageable on B) + adds new data
+    // A rewrites the file quoting B's home in NON-CANONICAL case — C′ still
+    // skips this (re-tokenizing can't reproduce the original case), which is
+    // exactly the skip we need to exercise the push guard.
     let v2 = format!(
         "{{\"note\":\"peer log said {}/x\"}}\n{{\"note\":\"IMPORTANT-V2\"}}\n",
-        env.dev_b.home_str()
+        env.dev_b.home_str().to_uppercase()
     );
     fs::write(env.dev_a.claude().join(rel), v2.as_bytes()).unwrap();
     let (c, o) = run(&env.dev_a, &["push"]);

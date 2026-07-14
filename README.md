@@ -75,6 +75,15 @@ claude-xsync init --remote git@github.com:you/claude-state.git --device win
 claude-xsync pull
 ```
 
+Recommended: add a note to your synced `~/.claude/CLAUDE.md` so the model
+adapts to whichever machine you're on:
+
+```
+This ~/.claude is synced between macOS (/Users/<mac-user>) and Windows
+(C:\Users\<win-user>). Path mentions in older turns may reference the
+other machine; trust the current pwd/environment.
+```
+
 Daily flow: finish work → `push`; sit down at the other machine → `pull`.
 Both commands support `--dry-run`, refuse to run while Claude Code is open
 (`--force` to override), and print a fixed summary:
@@ -111,18 +120,19 @@ unknown top-level entries are reported, never silently synced.
 - **Paths containing spaces** inside file *content* end the match at the space.
   The round-trip gate catches any damage and stores the file verbatim — nothing
   corrupts, but such paths aren't rewritten. Prefer space-free project paths.
-- **Quoted other-OS paths are preserved as-is — and pin the file to its
-  device**: each device only rewrites its *own* home forms, so a Windows path
-  quoted inside a Mac session stays exactly as quoted. Consequence: a file
-  that quotes the *peer's* home fails the peer's pull verification and is
-  skipped there (reported on every pull). The peer's pushes refuse to touch
-  such files, so nothing is ever lost — but that file effectively syncs in
-  one direction only.
-- **Mid-string home occurrences are rewritten too**: matching has no
-  left-boundary rule, so a home path embedded directly after other path text
-  (e.g. the `/System/Volumes/Data/Users/<name>/…` firmlink alias) is
-  tokenized from the home onward. This makes `file:///Users/<name>/…` URLS
-  translate usefully, but concatenated forms can read oddly on the peer.
+- **Quoted peer-home text is absorbed once**: each device rewrites only its
+  *own* home forms, so a peer-home path quoted in conversation text arrives
+  intact on the peer, then becomes a live (translating) path from the next
+  push on (reported as `absorbed` during pull). Machine-consumed paths (cwd,
+  checkpoint keys) are unaffected throughout. Non-canonical-case quotes that
+  can't absorb losslessly are skipped instead (fail-closed). If you need
+  permanent quote fidelity, that is the v2 peer-home registry (spec §11).
+- **Left-boundary residual**: paths under a different root that embed a home
+  shape (e.g. `/mnt/backup/Users/<name>/…`) still translate, because a
+  preceding separator is allowed — that is what keeps `file:///…` and `\\?\…`
+  prefixes translating. Concatenated forms after a non-separator character
+  (like the `/System/Volumes/Data/Users/<name>` firmlink alias) are preserved
+  as-is.
 - **Directory-key encoding is lossy**: using a sibling of your home
   (`/Users/woong.bak/…`) as a project root can mis-tokenize its `projects/`
   key. Rare; avoid that layout.

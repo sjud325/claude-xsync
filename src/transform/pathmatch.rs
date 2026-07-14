@@ -59,7 +59,7 @@ pub fn normalize_text(input: &str, m: &PathMapper) -> NormalizedText {
         // Left boundary (spec §12.1): a run char directly before the match
         // start blocks it — except separators ('/', '\\'), which keep
         // file:/// URLs and \\?\ long-path prefixes translating.
-        let left_ok = prev.map_or(true, |c| !is_run_char(c) || matches!(c, '/' | '\\'));
+        let left_ok = prev.is_none_or(|c| !is_run_char(c) || matches!(c, '/' | '\\'));
         if left_ok {
             for t in &m.tokens {
                 if let Some(len) = match_local_at(&escaped, i, &t.local) {

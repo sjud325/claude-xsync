@@ -320,6 +320,26 @@ fn stage_entry(
                 .map_err(|err| anyhow::anyhow!("{err}"))?;
             match normalize_file(portable, &resolved, mapper) {
                 TransformOutcome::Transformed { data, .. } if data == payload => Ok(resolved),
+                TransformOutcome::Transformed { data: d2, .. } => {
+                    // One-step stability (spec §12.2, decision C′): quoted
+                    // peer-home text re-tokenizes under THIS device's mapper.
+                    // That is absorption, not corruption — but only if the
+                    // absorbed form is already a fixpoint; anything else is
+                    // treated as damage and skipped.
+                    let stable = resolve_file_pull(portable, &d2, mapper)
+                        .map(|r2| r2 == resolved)
+                        .unwrap_or(false);
+                    if stable {
+                        println!(
+                            "⚠ {portable}: quoted peer-device path text absorbed as live local paths (one-time; see README)"
+                        );
+                        Ok(resolved)
+                    } else {
+                        anyhow::bail!(
+                            "pull reverse-verify failed (resolved form does not re-normalize)"
+                        )
+                    }
+                }
                 _ => anyhow::bail!(
                     "pull reverse-verify failed (resolved form does not re-normalize)"
                 ),

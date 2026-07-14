@@ -131,7 +131,7 @@ git commit -m "feat: separator-exception left boundary for home matching (spec 1
 - Consumes: `normalize_file`, `resolve_file_pull` (transform::file), existing `stage_entry` signature — unchanged.
 - Produces: `stage_entry` now returns Ok(resolved) for the stable-absorption case and prints a `⚠ … absorbed` notice; unstable mismatches still Err → skip.
 
-- [ ] **Step 1: Rework the C1 regression trigger** (it currently relies on quoted-home = skip, which C′ changes)
+- [x] **Step 1: Rework the C1 regression trigger** (it currently relies on quoted-home = skip, which C′ changes)
 
 In `pull_skip_must_not_cascade_into_push_clobber`, make the quote non-canonical-case so C′ still rejects it (absorbing it would rewrite the quote's case — unstable, fail-closed):
 
@@ -147,7 +147,7 @@ In `pull_skip_must_not_cascade_into_push_clobber`, make the quote non-canonical-
 
 (Only the `v2` construction changes; every assertion in the test stays as is.)
 
-- [ ] **Step 2: Write the failing absorption e2e test** (append to tests/e2e.rs)
+- [x] **Step 2: Write the failing absorption e2e test** (append to tests/e2e.rs)
 
 ```rust
 #[test]
@@ -196,12 +196,12 @@ fn quoted_peer_home_absorbed_once_and_syncs() {
 }
 ```
 
-- [ ] **Step 3: Run tests to verify the new one fails and the reworked one still fails-for-the-right-reason**
+- [x] **Step 3: Run tests to verify the new one fails and the reworked one still fails-for-the-right-reason**
 
 Run: `cargo test --test e2e quoted_peer_home pull_skip`
 Expected: `quoted_peer_home_absorbed_once_and_syncs` FAILS (pull exits 1, file skipped). `pull_skip_must_not_cascade_into_push_clobber` PASSES already (uppercase quote still skips under current code) — that is fine; it is a guard-rail for Step 4.
 
-- [ ] **Step 4: Implement C′ in `stage_entry`**
+- [x] **Step 4: Implement C′ in `stage_entry`**
 
 Replace the `EntryMode::Transformed` arm:
 
@@ -234,12 +234,12 @@ Replace the `EntryMode::Transformed` arm:
         }
 ```
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `cargo test --all-targets`
 Expected: all pass — the absorption test goes green; `pull_skip_must_not_cascade_into_push_clobber` still passes because the uppercase quote fails the stability check (case is not reproducible from the canonical home).
 
-- [ ] **Step 6: Update README**
+- [x] **Step 6: Update README**
 
 Replace the "Quoted other-OS paths…" limitation bullet with the one-time-absorption semantics, drop the now-fixed mid-string bullet in favor of the residual `…/Users/<name>`-under-other-root caveat, and add a recommended shared-CLAUDE.md snippet to the quickstart:
 
@@ -268,7 +268,7 @@ adapts to whichever machine you're on:
     other machine; trust the current pwd/environment.
 ```
 
-- [ ] **Step 7: Verify + Commit**
+- [x] **Step 7: Verify + Commit**
 
 ```bash
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --all-targets
