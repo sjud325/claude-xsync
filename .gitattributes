@@ -1,0 +1,3 @@
+# Golden fixtures and their snapshots are byte-exact test subjects —
+# never let a Windows checkout CRLF-translate them.
+*.jsonl -text

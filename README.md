@@ -111,10 +111,18 @@ unknown top-level entries are reported, never silently synced.
 - **Paths containing spaces** inside file *content* end the match at the space.
   The round-trip gate catches any damage and stores the file verbatim — nothing
   corrupts, but such paths aren't rewritten. Prefer space-free project paths.
-- **Quoted other-OS paths are preserved as-is**: each device only rewrites its
-  *own* home forms. A Windows path quoted inside a Mac session (pasted logs,
-  cross-OS discussions) stays exactly as quoted — that is the correct
-  semantics, not a bug.
+- **Quoted other-OS paths are preserved as-is — and pin the file to its
+  device**: each device only rewrites its *own* home forms, so a Windows path
+  quoted inside a Mac session stays exactly as quoted. Consequence: a file
+  that quotes the *peer's* home fails the peer's pull verification and is
+  skipped there (reported on every pull). The peer's pushes refuse to touch
+  such files, so nothing is ever lost — but that file effectively syncs in
+  one direction only.
+- **Mid-string home occurrences are rewritten too**: matching has no
+  left-boundary rule, so a home path embedded directly after other path text
+  (e.g. the `/System/Volumes/Data/Users/<name>/…` firmlink alias) is
+  tokenized from the home onward. This makes `file:///Users/<name>/…` URLS
+  translate usefully, but concatenated forms can read oddly on the peer.
 - **Directory-key encoding is lossy**: using a sibling of your home
   (`/Users/woong.bak/…`) as a project root can mis-tokenize its `projects/`
   key. Rare; avoid that layout.
@@ -126,7 +134,13 @@ unknown top-level entries are reported, never silently synced.
 - **Hooks / statusLine commands** in settings sync as-is; the executable and
   shell syntax must exist on both OSes (paths are rewritten, semantics aren't).
 - **Metadata visibility**: the remote exposes object count/sizes/commit times
-  and the salt. Content, names, and paths are never visible.
+  and the salt. Content, names, and paths are never visible. There is no
+  freshness protection: whoever can force-push the remote can replay an older
+  (internally consistent) snapshot; devices would realign to it, keeping
+  local backups as the only trace.
+- **Backups accumulate**: every pull that replaces files writes a full copy
+  under `~/.claude.backup.<ts>/` and nothing prunes them — clean up
+  periodically if disk space matters.
 - **Korean filenames (NFC/NFD)**: macOS decomposes filenames (NFD) while
   Windows keeps NFC; if you hit duplicate-looking files, normalize project
   filenames to NFC.
