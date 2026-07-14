@@ -54,32 +54,41 @@ pub fn normalize_text(input: &str, m: &PathMapper) -> NormalizedText {
     let mut out = String::with_capacity(escaped.len());
     let mut spans = Vec::new();
     let mut i = 0;
+    let mut prev: Option<char> = None;
     'outer: while i < escaped.len() {
-        for t in &m.tokens {
-            if let Some(len) = match_local_at(&escaped, i, &t.local) {
-                let run_start = i + len;
-                let mut run_end = run_start;
-                for c in escaped[run_start..].chars() {
-                    if is_run_char(c) {
-                        run_end += c.len_utf8();
-                    } else {
-                        break;
+        // Left boundary (spec §12.1): a run char directly before the match
+        // start blocks it — except separators ('/', '\\'), which keep
+        // file:/// URLs and \\?\ long-path prefixes translating.
+        let left_ok = prev.map_or(true, |c| !is_run_char(c) || matches!(c, '/' | '\\'));
+        if left_ok {
+            for t in &m.tokens {
+                if let Some(len) = match_local_at(&escaped, i, &t.local) {
+                    let run_start = i + len;
+                    let mut run_end = run_start;
+                    for c in escaped[run_start..].chars() {
+                        if is_run_char(c) {
+                            run_end += c.len_utf8();
+                        } else {
+                            break;
+                        }
                     }
+                    // Original span must be recovered from pre-escape input: since
+                    // ESC substitution only rewrites "${", and "${" cannot occur
+                    // inside a matched local+run (run charset excludes '{'), the
+                    // escaped slice equals the original slice here.
+                    let original = escaped[i..run_end].to_string();
+                    out.push_str(&format!("${{{}}}", t.name));
+                    out.push_str(&escaped[run_start..run_end].replace('\\', "/"));
+                    spans.push(SpanRecord { original });
+                    prev = escaped[i..run_end].chars().last();
+                    i = run_end;
+                    continue 'outer;
                 }
-                // Original span must be recovered from pre-escape input: since
-                // ESC substitution only rewrites "${", and "${" cannot occur
-                // inside a matched local+run (run charset excludes '{'), the
-                // escaped slice equals the original slice here.
-                let original = escaped[i..run_end].to_string();
-                out.push_str(&format!("${{{}}}", t.name));
-                out.push_str(&escaped[run_start..run_end].replace('\\', "/"));
-                spans.push(SpanRecord { original });
-                i = run_end;
-                continue 'outer;
             }
         }
         let c = escaped[i..].chars().next().unwrap();
         out.push(c);
+        prev = Some(c);
         i += c.len_utf8();
     }
     NormalizedText { text: out, spans }
@@ -239,6 +248,35 @@ mod tests {
     fn unknown_token_passes_through_in_content() {
         let r = resolve_text("echo ${PATH} and ${WORK}/x", &mac(), ResolveMode::Pull);
         assert_eq!(r, "echo ${PATH} and ${WORK}/x");
+    }
+
+    #[test]
+    fn left_boundary_blocks_concatenated_home() {
+        // macOS firmlink alias: previous char 'a' is a run char → no match
+        let n = normalize_text("/System/Volumes/Data/Users/woong/ws", &mac());
+        assert_eq!(n.text, "/System/Volumes/Data/Users/woong/ws");
+        assert!(n.spans.is_empty());
+    }
+
+    #[test]
+    fn left_boundary_allows_separator_prefix_urls() {
+        // file:// URLs keep translating (previous char '/')
+        let n = normalize_text("open file:///Users/woong/doc.md now", &mac());
+        assert_eq!(n.text, "open file://${HOME}/doc.md now");
+    }
+
+    #[test]
+    fn left_boundary_allows_longpath_prefix() {
+        // \\?\ long-path prefix keeps translating (previous char '\')
+        let n = normalize_text(r"\\?\C:\Users\Loki\ws", &win());
+        assert_eq!(n.text, r"\\?\${HOME}/ws");
+    }
+
+    #[test]
+    fn left_boundary_blocks_alnum_prefix_win() {
+        let n = normalize_text(r"xC:\Users\Loki\ws", &win());
+        assert_eq!(n.text, r"xC:\Users\Loki\ws");
+        assert!(n.spans.is_empty());
     }
 
     #[test]

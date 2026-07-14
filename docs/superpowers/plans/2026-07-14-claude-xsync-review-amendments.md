@@ -27,7 +27,7 @@
 - Consumes: `is_run_char` (private, already in pathmatch.rs).
 - Produces: no signature changes — `normalize_text` behavior narrows (fewer matches). Invariants A/B are preserved automatically because verify/pull resolve consume whatever normalize produced.
 
-- [ ] **Step 1: Write the failing tests** (append to `#[cfg(test)] mod tests` in pathmatch.rs)
+- [x] **Step 1: Write the failing tests** (append to `#[cfg(test)] mod tests` in pathmatch.rs)
 
 ```rust
 #[test]
@@ -60,12 +60,12 @@ fn left_boundary_blocks_alnum_prefix_win() {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `cargo test pathmatch::tests::left_boundary`
 Expected: FAIL — `left_boundary_blocks_concatenated_home` and `left_boundary_blocks_alnum_prefix_win` assert untouched text but current code tokenizes.
 
-- [ ] **Step 3: Implement** — track the previous char in the normalize scan loop
+- [x] **Step 3: Implement** — track the previous char in the normalize scan loop
 
 In `normalize_text`, replace the scan loop with:
 
@@ -106,12 +106,12 @@ In `normalize_text`, replace the scan loop with:
 
 (Everything else in the function unchanged. `resolve_text` needs no change: it replays tokens normalize inserted.)
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test --all-targets`
 Expected: all pass, including the existing invariant proptest and goldens. If a golden fails, inspect the diff per Files note above.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/transform/pathmatch.rs
