@@ -15,6 +15,21 @@ pub fn repo_dir() -> PathBuf {
     crate::config::xsync_dir().join("repo")
 }
 
+/// Defense-in-depth alongside gitx's `-c core.autocrlf=false`: mark every
+/// file in the sync repo as non-text so no OTHER git tooling ever newline-
+/// translates an encrypted blob. Self-heals repos created by older versions
+/// (picked up by the next commit).
+pub fn ensure_repo_attributes(repo: &Path) -> anyhow::Result<()> {
+    let p = repo.join(".gitattributes");
+    if !p.exists() {
+        crate::fsx::atomic_write(
+            &p,
+            b"# encrypted blobs only -- never translate newlines\n* -text\n",
+        )?;
+    }
+    Ok(())
+}
+
 pub fn read_salt(repo: &Path) -> anyhow::Result<[u8; 32]> {
     let raw = std::fs::read_to_string(repo.join("salt"))
         .map_err(|e| anyhow::anyhow!("missing repo salt — run init first ({e})"))?;

@@ -51,6 +51,7 @@ impl Git {
 
     pub fn is_ancestor(&self, a: &str, b: &str) -> anyhow::Result<bool> {
         let status = Command::new("git")
+            .args(["-c", "core.autocrlf=false"])
             .args(["merge-base", "--is-ancestor", a, b])
             .current_dir(&self.repo)
             .output()
@@ -136,6 +137,11 @@ impl Git {
 
 fn run_git(cwd: &Path, args: &[&str]) -> anyhow::Result<String> {
     let out = Command::new("git")
+        // The sync repo holds opaque encrypted blobs; small age objects are
+        // mostly-printable and git's content sniffing occasionally (~0.3%)
+        // classifies them as text — newline translation then corrupts them.
+        // Kill translation regardless of the user's global config.
+        .args(["-c", "core.autocrlf=false"])
         .args(args)
         .current_dir(cwd)
         .output()

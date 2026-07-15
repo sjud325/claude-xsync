@@ -422,6 +422,104 @@ fn variant_case_quote_absorbs_with_canonicalization() {
 }
 
 #[test]
+fn sync_survives_autocrlf_git_config() {
+    // Windows Git defaults to core.autocrlf=true; git classifies NUL-free
+    // blobs as text, and small age ciphertexts are NUL-free ~30% of the
+    // time — so checkout/add newline translation corrupts objects unless the
+    // repo defends itself. Force the hostile config on every git the binary
+    // spawns and require a full round trip to survive it.
+    let env = TestEnv::new();
+    let gitcfg = env.bare.path().join("gitconfig-autocrlf");
+    fs::write(&gitcfg, "[core]\n\tautocrlf = true\n").unwrap();
+    let cfg = gitcfg.to_string_lossy().to_string();
+    let hostile: &[(&str, &str)] = &[("GIT_CONFIG_GLOBAL", cfg.as_str())];
+
+    let init_a = [
+        "init",
+        "--remote",
+        &env.bare_url(),
+        "--device",
+        "mac",
+        "--passphrase-env",
+        "XSYNC_PASSPHRASE",
+    ];
+    assert_eq!(run_env(&env.dev_a, &init_a, hostile).0, 0);
+    let (c, o) = run_env(&env.dev_a, &["push"], hostile);
+    assert_eq!(c, 0, "{o}");
+
+    // Plant a canary that git's content sniffing WILL classify as text —
+    // small age objects hit this ~0.3% of the time (mostly-printable header,
+    // tiny ciphertext), which is exactly the Windows CI flake. The canary
+    // makes the failure deterministic on every OS.
+    let canary = b"age-canary: printable header line\nsecond line, still printable\n";
+    {
+        let stage = TempDir::new().unwrap();
+        let clone = stage.path().join("clone");
+        let clone_s = clone.to_string_lossy().to_string();
+        let git = |args: &[&str]| {
+            let out = Command::new("git").args(args).output().unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["clone", &env.bare_url(), clone_s.as_str()]);
+        fs::write(clone.join("objects/zz-canary.age"), canary).unwrap();
+        git(&["-C", clone_s.as_str(), "add", "-A"]);
+        git(&[
+            "-C",
+            clone_s.as_str(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-m",
+            "canary",
+        ]);
+        git(&["-C", clone_s.as_str(), "push", "origin", "main"]);
+    }
+
+    let init_b = [
+        "init",
+        "--remote",
+        &env.bare_url(),
+        "--device",
+        "win",
+        "--passphrase-env",
+        "XSYNC_PASSPHRASE",
+    ];
+    assert_eq!(run_env(&env.dev_b, &init_b, hostile).0, 0);
+    // the binary's own clone must deliver every object byte-identical even
+    // under a hostile global autocrlf=true
+    assert_eq!(
+        fs::read(env.dev_b.xsync().join("repo/objects/zz-canary.age")).unwrap(),
+        canary.to_vec(),
+        "git newline translation corrupted an object in the sync repo clone"
+    );
+    let (c, o) = run_env(&env.dev_b, &["pull"], hostile);
+    assert_eq!(c, 0, "pull must survive autocrlf: {o}");
+    assert!(!o.contains("skipping"), "no object may corrupt: {o}");
+
+    // B edits + pushes, A pulls — the same round trip the CI flake died on
+    fs::write(
+        env.dev_b.claude().join("settings.json"),
+        b"{\"model\":\"b-edit\"}",
+    )
+    .unwrap();
+    let (c, o) = run_env(&env.dev_b, &["push"], hostile);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run_env(&env.dev_a, &["pull"], hostile);
+    assert_eq!(c, 0, "pull after peer push must survive autocrlf: {o}");
+    assert!(!o.contains("skipping"), "no object may corrupt: {o}");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"b-edit\"}"
+    );
+}
+
+#[test]
 fn rekey_reencrypts_and_squashes_old_key_out() {
     let env = TestEnv::new();
     assert_eq!(env.init(&env.dev_a).0, 0);

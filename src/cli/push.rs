@@ -29,6 +29,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         git.pull_ff()?;
     }
 
+    crate::cli::ensure_repo_attributes(&repo)?;
     let keys = load_keys(&cfg, &repo)?;
     let manifest = read_manifest(&repo, &keys)?;
     let mut st = state::load_state();

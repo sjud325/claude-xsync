@@ -20,6 +20,8 @@ pub fn run_init(opts: InitOpts) -> anyhow::Result<i32> {
     let git = Git::clone_or_open(&opts.remote, &repo)?;
     git.pull_ff()?;
 
+    crate::cli::ensure_repo_attributes(&repo)?;
+
     // salt: create on first device, reuse on the second
     let salt_path = repo.join("salt");
     if !salt_path.exists() {

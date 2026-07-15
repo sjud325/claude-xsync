@@ -72,6 +72,7 @@ pub fn scan(claude_dir: &Path, cfg: &Config) -> anyhow::Result<ScanResult> {
             && !removed
             && !name.starts_with(".last-")
             && name != ".xsync-backups"
+            && name != ".DS_Store"
         {
             unknown.push(name);
         }
@@ -86,7 +87,7 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> anyhow::R
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         let ft = entry.file_type()?;
-        if ft.is_symlink() {
+        if ft.is_symlink() || name == ".DS_Store" {
             continue;
         }
         let rel = format!("{prefix}/{name}");
@@ -124,6 +125,9 @@ mod tests {
         fs::write(td.path().join("ide/x"), b"x").unwrap();
         fs::create_dir_all(td.path().join("weird-new-dir")).unwrap();
         fs::write(td.path().join("weird-new-dir/f"), b"f").unwrap();
+        // macOS noise must be silently ignored at every level
+        fs::write(td.path().join(".DS_Store"), b"junk").unwrap();
+        fs::write(td.path().join("projects/a/.DS_Store"), b"junk").unwrap();
 
         let cfg = Config::default();
         let r = scan(td.path(), &cfg).unwrap();

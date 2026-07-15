@@ -37,6 +37,8 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
         git.pull_ff()?;
     }
 
+    crate::cli::ensure_repo_attributes(&repo)?;
+
     // new salt → new keys
     let mut salt = [0u8; 32];
     getrandom::getrandom(&mut salt)
