@@ -131,6 +131,19 @@ impl Git {
         if self.head().is_err() {
             return self.run(&["reset", "--hard", "origin/main"]).map(|_| ());
         }
+        // init/push plant .gitattributes before it is ever committed; a merge
+        // refuses to overwrite an untracked file, so when the peer's push has
+        // added the tracked copy the pull would abort. The content is fixed,
+        // so dropping our untracked copy is lossless — and newline safety
+        // doesn't lapse because every git call forces core.autocrlf=false.
+        let attrs = self.repo.join(".gitattributes");
+        if attrs.exists()
+            && self
+                .run(&["ls-files", "--error-unmatch", ".gitattributes"])
+                .is_err()
+        {
+            std::fs::remove_file(&attrs)?;
+        }
         self.run(&["merge", "--ff-only", "origin/main"]).map(|_| ())
     }
 }

@@ -67,6 +67,9 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     } else {
         git.pull_ff()?;
     }
+    // re-plant after merge: pull_ff may drop an untracked copy to let the
+    // peer's tracked one land, but the peer might not ship one at all
+    crate::cli::ensure_repo_attributes(&repo)?;
 
     // keys AFTER fetch/reset — a rekey may have replaced the salt
     let keys = load_keys(&cfg, &repo)?;
