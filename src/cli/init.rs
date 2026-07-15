@@ -59,6 +59,7 @@ pub fn run_init(opts: InitOpts) -> anyhow::Result<i32> {
     if !opts.no_claude_md
         && !manifest_exists
         && crate::cli::claude_md::ensure_note(&config::claude_dir())?
+            != crate::cli::claude_md::NoteAction::Unchanged
     {
         println!("added a multi-device note to ~/.claude/CLAUDE.md (managed block — delete it or use --no-claude-md to opt out)");
     }
