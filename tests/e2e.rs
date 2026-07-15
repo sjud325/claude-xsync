@@ -681,7 +681,16 @@ fn app_index_creates_entries_for_unindexed_sessions() {
     assert_eq!(v["completedTurns"], 0); // session-specific fields reset
     assert_eq!(v["writtenBranches"], serde_json::json!([]));
     assert_eq!(v["isArchived"], false);
-    assert!(v["cwd"].as_str().unwrap().ends_with("/ws/app"), "{v}");
+    // the app stores cwd in the platform's NATIVE separator form
+    let expected_cwd_tail = if cfg!(windows) {
+        "\\ws\\app"
+    } else {
+        "/ws/app"
+    };
+    assert!(
+        v["cwd"].as_str().unwrap().ends_with(expected_cwd_tail),
+        "{v}"
+    );
 
     // idempotent: second run creates nothing
     let (c, o) = run_env(&env.dev_a, &["app-index"], hostile);
