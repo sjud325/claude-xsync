@@ -76,9 +76,18 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         println!("sealing {to_seal} changed files…");
     }
     let mut sealed_count = 0usize;
+    let mut mtime_backfills = 0usize;
 
     for (portable, lf) in &locals {
         if unchanged.contains(portable) {
+            // pre-0.1.5 manifests carry no mtimes — backfill from this
+            // device's originals so pulls can restore --resume ordering
+            if let (Some(m), Some(e)) = (lf.mtime, entries.get_mut(portable)) {
+                if e.mtime.is_none() {
+                    e.mtime = Some(m);
+                    mtime_backfills += 1;
+                }
+            }
             continue;
         }
         // Never overwrite a manifest entry that moved past our anchor — the
@@ -129,6 +138,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
                 plaintext_hash: lf.portable_hash.clone(),
                 size: lf.payload.len() as u64,
                 mode: lf.mode,
+                mtime: lf.mtime,
             },
         );
         pending_state.push((portable.clone(), lf.portable_hash.clone()));
@@ -169,7 +179,10 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         return Ok(summary.exit_code());
     }
 
-    if summary.synced > 0 || !deletions.is_empty() {
+    if mtime_backfills > 0 {
+        println!("backfilled timestamps for {mtime_backfills} entries");
+    }
+    if summary.synced > 0 || !deletions.is_empty() || mtime_backfills > 0 {
         write_manifest(
             &repo,
             &keys,

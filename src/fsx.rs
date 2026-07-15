@@ -36,6 +36,15 @@ pub fn backup_files(claude_dir: &Path, rels: &[String], stamp: &str) -> anyhow::
     Ok(backup)
 }
 
+/// Set a file's modification time (unix secs).
+pub fn set_mtime(path: &Path, unix_secs: u64) -> anyhow::Result<()> {
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(long_path(path))?;
+    f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix_secs))?;
+    Ok(())
+}
+
 /// Windows: prefix `\\?\` when the path grows past MAX_PATH territory; no-op elsewhere.
 pub fn long_path(p: &Path) -> PathBuf {
     if cfg!(windows) {

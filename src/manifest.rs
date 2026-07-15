@@ -17,6 +17,10 @@ pub struct Entry {
     pub plaintext_hash: String,
     pub size: u64,
     pub mode: EntryMode,
+    /// Source file's modification time (unix secs) — restored on pull so
+    /// `--resume` ordering survives the sync. Absent in pre-0.1.5 manifests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -60,6 +64,7 @@ mod tests {
                 plaintext_hash: "ff".into(),
                 size: 42,
                 mode: EntryMode::Transformed,
+                mtime: Some(1_700_000_000),
             },
         );
         let m = Manifest {

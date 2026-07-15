@@ -28,6 +28,7 @@ enum Planned {
         portable: String,
         hash: String,
         conflict_local: Option<Vec<u8>>,
+        mtime: Option<u64>,
     },
     McpMerge {
         subtree: String,
@@ -40,6 +41,13 @@ enum Planned {
     StateOnly {
         portable: String,
         hash: String,
+        touch: Option<(String, u64)>, // (rel, mtime) repair
+    },
+    /// metadata-only repair: in-sync file whose mtime drifted (e.g. written
+    /// by a pre-0.1.5 pull that stamped everything with pull time)
+    TouchMtime {
+        rel: String,
+        mtime: u64,
     },
 }
 
@@ -129,13 +137,25 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 let local_h = local.map(|l| l.portable_hash.clone());
                 let local_changed = local_h.as_deref() != state_h.as_deref();
                 let remote_changed = Some(e.plaintext_hash.as_str()) != state_h.as_deref();
+                // in-sync content whose mtime drifted (pre-0.1.5 pulls) gets
+                // a metadata-only repair
+                let touch = |l: &crate::cli::LocalFile| -> Option<(String, u64)> {
+                    let (rel, want) = (l.rel.clone()?, e.mtime?);
+                    (l.mtime.unwrap_or(0).abs_diff(want) > 1).then_some((rel, want))
+                };
                 if !remote_changed {
+                    if !local_changed {
+                        if let Some((rel, mtime)) = local.and_then(touch) {
+                            planned.push(Planned::TouchMtime { rel, mtime });
+                        }
+                    }
                     continue; // in-sync or local-only changed — preserve (push target)
                 }
                 if local_h.as_deref() == Some(e.plaintext_hash.as_str()) {
                     planned.push(Planned::StateOnly {
                         portable: portable.clone(),
                         hash: e.plaintext_hash.clone(),
+                        touch: local.and_then(touch),
                     });
                     continue;
                 }
@@ -180,6 +200,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         portable: portable.clone(),
                         hash: e.plaintext_hash.clone(),
                         conflict_local: None,
+                        mtime: e.mtime,
                     });
                 } else if rel == "history.jsonl" {
                     // append-only special case: line-set union, no conflict copy
@@ -190,6 +211,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         portable: portable.clone(),
                         hash: e.plaintext_hash.clone(),
                         conflict_local: None,
+                        mtime: None, // union output is new content
                     });
                 } else {
                     summary.conflicts += 1;
@@ -199,6 +221,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         portable: portable.clone(),
                         hash: e.plaintext_hash.clone(),
                         conflict_local: Some(local.unwrap().raw.clone()),
+                        mtime: e.mtime,
                     });
                 }
             }
@@ -228,7 +251,15 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                     )
                 }
                 Planned::StateOnly { portable, .. } => println!("already in sync: {portable}"),
+                Planned::TouchMtime { .. } => {}
             }
+        }
+        let touches = planned
+            .iter()
+            .filter(|p| matches!(p, Planned::TouchMtime { .. }))
+            .count();
+        if touches > 0 {
+            println!("would repair timestamps on {touches} in-sync files");
         }
         summary.print();
         return Ok(summary.exit_code());
@@ -250,6 +281,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     }
 
     let claude_json_path = home.join(".claude.json");
+    let mut touched = 0usize;
     for p in planned {
         match p {
             Planned::Write {
@@ -258,6 +290,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 portable,
                 hash,
                 conflict_local,
+                mtime,
             } => {
                 if let Some(local_raw) = conflict_local {
                     let cpath = claude_dir.join(format!("{rel}.xsync-conflict.{stamp}"));
@@ -267,7 +300,11 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         cpath.display()
                     );
                 }
-                crate::fsx::atomic_write(&claude_dir.join(&rel), &bytes)?;
+                let target = claude_dir.join(&rel);
+                crate::fsx::atomic_write(&target, &bytes)?;
+                if let Some(m) = mtime {
+                    let _ = crate::fsx::set_mtime(&target, m);
+                }
                 state::upsert_and_save(&mut st, &portable, &hash)?;
                 summary.synced += 1;
             }
@@ -290,10 +327,27 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 st.files.remove(&portable);
                 state::save_state(&st)?;
             }
-            Planned::StateOnly { portable, hash } => {
+            Planned::StateOnly {
+                portable,
+                hash,
+                touch,
+            } => {
                 state::upsert_and_save(&mut st, &portable, &hash)?;
+                if let Some((rel, m)) = touch {
+                    if crate::fsx::set_mtime(&claude_dir.join(&rel), m).is_ok() {
+                        touched += 1;
+                    }
+                }
+            }
+            Planned::TouchMtime { rel, mtime } => {
+                if crate::fsx::set_mtime(&claude_dir.join(&rel), mtime).is_ok() {
+                    touched += 1;
+                }
             }
         }
+    }
+    if touched > 0 {
+        println!("repaired timestamps on {touched} in-sync files");
     }
 
     st.last_synced_commit = Some(git.head()?);

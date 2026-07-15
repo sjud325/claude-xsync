@@ -72,6 +72,7 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
                 plaintext_hash: lf.portable_hash.clone(),
                 size: lf.payload.len() as u64,
                 mode: lf.mode,
+                mtime: lf.mtime,
             },
         );
         new_state

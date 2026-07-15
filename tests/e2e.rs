@@ -519,6 +519,86 @@ fn sync_survives_autocrlf_git_config() {
     );
 }
 
+fn set_mtime(path: &std::path::Path, unix_secs: u64) {
+    let f = fs::OpenOptions::new().write(true).open(path).unwrap();
+    f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(unix_secs))
+        .unwrap();
+}
+
+fn mtime_secs(path: &std::path::Path) -> u64 {
+    fs::metadata(path)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+#[test]
+fn pull_preserves_original_mtimes() {
+    // `claude --resume` orders sessions by file mtime; a pull that stamps
+    // everything with "now" collapses the whole history into one moment.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let session = env
+        .dev_a
+        .claude()
+        .join(format!("projects/{}-ws-app/s.jsonl", env.dev_a.enc_home()));
+    let old = 1_700_000_000u64;
+    set_mtime(&session, old);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let applied = env
+        .dev_b
+        .claude()
+        .join(format!("projects/{}-ws-app/s.jsonl", env.dev_b.enc_home()));
+    let got = mtime_secs(&applied);
+    assert!(
+        got.abs_diff(old) <= 2,
+        "mtime must survive the round trip: got {got}, want ~{old}"
+    );
+}
+
+#[test]
+fn pull_repairs_drifted_mtimes_on_in_sync_files() {
+    // Files pulled by older versions carry pull-time mtimes; a later pull
+    // must repair them from the manifest without rewriting content.
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let session = env
+        .dev_a
+        .claude()
+        .join(format!("projects/{}-ws-app/s.jsonl", env.dev_a.enc_home()));
+    let old = 1_700_000_000u64;
+    set_mtime(&session, old);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // simulate the old-version damage: mtime drifted to "now"
+    let applied = env
+        .dev_b
+        .claude()
+        .join(format!("projects/{}-ws-app/s.jsonl", env.dev_b.enc_home()));
+    set_mtime(&applied, 1_800_000_000);
+
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let got = mtime_secs(&applied);
+    assert!(
+        got.abs_diff(old) <= 2,
+        "in-sync pull must repair drifted mtime: got {got}, want ~{old}"
+    );
+}
+
 #[test]
 fn rekey_reencrypts_and_squashes_old_key_out() {
     let env = TestEnv::new();

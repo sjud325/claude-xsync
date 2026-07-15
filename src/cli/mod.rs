@@ -166,6 +166,17 @@ pub struct LocalFile {
     pub mode: crate::manifest::EntryMode,
     pub verbatim_reason: Option<String>,
     pub portable_hash: String,
+    /// local modification time (unix secs); None for synthetic files
+    pub mtime: Option<u64>,
+}
+
+pub fn file_mtime_secs(path: &Path) -> Option<u64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 /// Shared by push/pull/status: scan + synthetic files (plugin manifests,
@@ -181,7 +192,7 @@ pub fn collect_locals(
     use crate::transform::file::TransformOutcome;
 
     let mut locals = std::collections::BTreeMap::new();
-    let mut add = |portable: String, rel: Option<String>, raw: Vec<u8>| {
+    let mut add = |portable: String, rel: Option<String>, raw: Vec<u8>, mtime: Option<u64>| {
         let (payload, mode, reason) = match crate::verify::push_gate(&portable, &raw, mapper) {
             TransformOutcome::Transformed { data, .. } => (data, EntryMode::Transformed, None),
             TransformOutcome::Verbatim { reason } => {
@@ -198,6 +209,7 @@ pub fn collect_locals(
                 mode,
                 verbatim_reason: reason,
                 portable_hash,
+                mtime,
             },
         );
     };
@@ -212,18 +224,21 @@ pub fn collect_locals(
             rel_to_portable(rel, mapper),
             Some(rel.clone()),
             std::fs::read(path)?,
+            file_mtime_secs(path),
         );
         if total >= 500 && (i + 1).is_multiple_of(1000) {
             println!("· {}/{total} transformed", i + 1);
         }
     }
     for rel in crate::special::plugins::plugin_manifest_rels(&claude_dir.join("plugins")) {
-        let raw = std::fs::read(claude_dir.join(&rel))?;
-        add(rel.clone(), Some(rel), raw);
+        let path = claude_dir.join(&rel);
+        let raw = std::fs::read(&path)?;
+        let mtime = file_mtime_secs(&path);
+        add(rel.clone(), Some(rel), raw, mtime);
     }
     if let Ok(claude_json) = std::fs::read_to_string(home.join(".claude.json")) {
         if let Some(subtree) = crate::special::mcp::extract_mcp(&claude_json)? {
-            add(MCP_PORTABLE.to_string(), None, subtree.into_bytes());
+            add(MCP_PORTABLE.to_string(), None, subtree.into_bytes(), None);
         }
     }
     Ok((locals, scanres.unknown))
