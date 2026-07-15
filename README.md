@@ -196,15 +196,18 @@ unknown top-level entries are reported, never silently synced.
 
 ## Real-machine validation status
 
-The mac → Windows direction is verified end-to-end on the real two-machine
-setup (2026-07-15/16): push (3,309 files) → pull (0 skipped, 2 expected
-conflicts) → mtime repair (3,297 files, `--resume` ordering restored) →
-`app-index` (254 sessions) → sessions visible and resumable in the Windows
-desktop app, including the app's own missing-cwd folder picker.
+Both directions are verified end-to-end on the real two-machine setup
+(2026-07-15/16). mac → Windows: push (3,309 files) → pull (0 skipped,
+2 expected conflicts) → mtime repair (3,297 files, `--resume` ordering
+restored) → `app-index` (254 sessions) → sessions visible and resumable in
+the Windows desktop app, including the app's own missing-cwd folder picker.
+Windows → mac: a session resumed and extended on Windows pushed back (34
+files incl. its subagent transcripts and the managed CLAUDE.md note) and
+applied cleanly on the mac (0 conflicts, paths and dir keys re-localized,
+`app-index` added 79 sessions alongside 188 native ones).
 
 Still to verify on real machines:
 
-- ☐ Windows → mac direction (push on win, pull + `app-index` on mac)
 - ☐ checkpoint/rewind works when `trackedFileBackups` keys are slash-form
 - ☐ plugins reinstall after pull
 - ☐ identical behavior from Git Bash and PowerShell (`init`/`push`/`pull`)
