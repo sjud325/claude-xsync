@@ -1,5 +1,6 @@
 //! Command orchestration only — no transform/crypto logic lives here.
 pub mod app_index;
+pub mod claude_md;
 pub mod gc;
 pub mod init;
 pub mod pull;

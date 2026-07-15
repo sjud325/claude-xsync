@@ -89,14 +89,13 @@ claude-xsync pull
 claude-xsync app-index   # optional: show the synced sessions in the Claude desktop app
 ```
 
-Recommended: add a note to your synced `~/.claude/CLAUDE.md` so the model
-adapts to whichever machine you're on:
-
-```
-This ~/.claude is synced between macOS (/Users/<mac-user>) and Windows
-(C:\Users\<win-user>). Path mentions in older turns may reference the
-other machine; trust the current pwd/environment.
-```
+`init` on the first device also adds a **multi-device note** to your synced
+`~/.claude/CLAUDE.md` (marker-delimited managed block) so that sessions
+resumed on the other machine know to trust the current environment over
+remembered machine-local paths (/tmp scratchpads, untracked working-tree
+files). Joining devices receive it via pull. Opt out with
+`init --no-claude-md` or by deleting the block; add it to an existing setup
+with `claude-xsync claude-md`.
 
 Daily flow: finish work → `push`; sit down at the other machine → `pull`.
 Both commands support `--dry-run`, refuse to run while Claude Code is open
@@ -111,6 +110,9 @@ Other commands:
   large session can add ~30 MB of history per push). The other device
   auto-recovers on its next pull.
 - `claude-xsync rekey` — new passphrase + salt, full re-encrypt, mandatory squash
+- `claude-xsync claude-md` — insert the multi-device resume note into
+  `~/.claude/CLAUDE.md` (for setups initialized before this existed;
+  idempotent, run on one device then push)
 - `claude-xsync app-index` — make synced sessions visible in the **Claude
   desktop app**. The app lists only sessions present in its private
   `local_*.json` index (`claude-code-sessions/<account>/<org>/` under the

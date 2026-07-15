@@ -47,6 +47,8 @@ enum Cmd {
         #[arg(long, default_value = "XSYNC_NEW_PASSPHRASE")]
         passphrase_env: String,
     },
+    /// Insert the multi-device resume note into ~/.claude/CLAUDE.md
+    ClaudeMd,
     /// Add synced sessions to the Claude desktop app's session list
     AppIndex {
         #[arg(long)]
@@ -66,6 +68,7 @@ fn main() {
         Cmd::Status { offline } => cli::status::run_status(offline),
         Cmd::Gc { squash } => cli::gc::run_gc(squash),
         Cmd::Rekey { passphrase_env } => cli::rekey::run_rekey(passphrase_env),
+        Cmd::ClaudeMd => cli::claude_md::run_claude_md(),
         Cmd::AppIndex { dry_run, all } => cli::app_index::run_app_index(dry_run, all),
     };
     match result {

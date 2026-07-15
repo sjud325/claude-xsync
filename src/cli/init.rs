@@ -13,6 +13,9 @@ pub struct InitOpts {
     /// Env var NAME that holds the passphrase (never the passphrase itself)
     #[arg(long, default_value = "XSYNC_PASSPHRASE")]
     pub passphrase_env: String,
+    /// Skip adding the multi-device note to ~/.claude/CLAUDE.md
+    #[arg(long)]
+    pub no_claude_md: bool,
 }
 
 pub fn run_init(opts: InitOpts) -> anyhow::Result<i32> {
@@ -44,11 +47,21 @@ pub fn run_init(opts: InitOpts) -> anyhow::Result<i32> {
     // key check: if the remote already has a manifest, decrypting it proves
     // the passphrase (wrong passphrase = abort, nothing written)
     let keys = load_keys(&cfg, &repo)?;
-    if read_manifest(&repo, &keys)?.is_some() {
+    let manifest_exists = read_manifest(&repo, &keys)?.is_some();
+    if manifest_exists {
         println!("existing remote manifest decrypted — passphrase verified");
     }
 
     config::save_config(&cfg)?;
+
+    // First device only: joining devices receive the note via pull instead,
+    // which avoids a spurious CLAUDE.md conflict on their first pull.
+    if !opts.no_claude_md
+        && !manifest_exists
+        && crate::cli::claude_md::ensure_note(&config::claude_dir())?
+    {
+        println!("added a multi-device note to ~/.claude/CLAUDE.md (managed block — delete it or use --no-claude-md to opt out)");
+    }
     println!(
         "initialized device {:?} → {} \nnote: losing the passphrase makes the REMOTE unrecoverable (plaintext stays on your devices; re-init to recover)",
         opts.device, opts.remote

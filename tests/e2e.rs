@@ -600,6 +600,69 @@ fn pull_repairs_drifted_mtimes_on_in_sync_files() {
 }
 
 #[test]
+fn init_inserts_multi_device_note_on_first_device_only() {
+    let env = TestEnv::new();
+    // first device (empty remote): note inserted
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let a_md = fs::read_to_string(env.dev_a.claude().join("CLAUDE.md")).unwrap();
+    assert!(a_md.contains("claude-xsync:multi-device:begin"), "{a_md}");
+    // the block must contain no literal home paths — the path transform
+    // would localize them on the peer and corrupt the text
+    assert!(!a_md.contains(&env.dev_a.home_str()));
+
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // second device (remote already has a manifest): init must NOT create a
+    // local CLAUDE.md — the note arrives via pull instead, conflict-free
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    assert!(!env.dev_b.claude().join("CLAUDE.md").exists());
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let b_md = fs::read_to_string(env.dev_b.claude().join("CLAUDE.md")).unwrap();
+    assert!(b_md.contains("claude-xsync:multi-device:begin"), "{b_md}");
+}
+
+#[test]
+fn claude_md_command_appends_preserving_content_idempotently() {
+    let env = TestEnv::new();
+    fs::write(env.dev_a.claude().join("CLAUDE.md"), "# my rules\n").unwrap();
+    let (c, o) = run(&env.dev_a, &["claude-md"]);
+    assert_eq!(c, 0, "{o}");
+    let md = fs::read_to_string(env.dev_a.claude().join("CLAUDE.md")).unwrap();
+    assert!(md.starts_with("# my rules"), "user content clobbered: {md}");
+    assert!(md.contains("claude-xsync:multi-device:begin"), "{md}");
+
+    // idempotent: second run changes nothing
+    let (c, o) = run(&env.dev_a, &["claude-md"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("already"), "{o}");
+    let md2 = fs::read_to_string(env.dev_a.claude().join("CLAUDE.md")).unwrap();
+    assert_eq!(md, md2);
+}
+
+#[test]
+fn init_no_claude_md_opts_out() {
+    let env = TestEnv::new();
+    let url = env.bare_url();
+    let (c, o) = run(
+        &env.dev_a,
+        &[
+            "init",
+            "--remote",
+            &url,
+            "--device",
+            "mac",
+            "--passphrase-env",
+            "XSYNC_PASSPHRASE",
+            "--no-claude-md",
+        ],
+    );
+    assert_eq!(c, 0, "{o}");
+    assert!(!env.dev_a.claude().join("CLAUDE.md").exists());
+}
+
+#[test]
 fn app_index_creates_entries_for_unindexed_sessions() {
     // The desktop app lists only sessions that have a local_*.json entry in
     // its private index — synced .jsonl files alone never appear. app-index
