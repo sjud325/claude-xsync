@@ -57,6 +57,19 @@ plaintext still lives on each device; re-`init` to recover. Rotate with
 `claude-xsync rekey`, which re-encrypts everything and squashes history so
 nothing decryptable with the old key survives.
 
+## Install
+
+Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
+(6 targets: macOS/Windows/Linux × x64/arm64) and put it on your PATH, or build
+from source:
+
+```bash
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.10-alpha claude-xsync
+```
+
+Check with `claude-xsync --version`. If you have installed both ways, PATH
+order decides which one runs (`which -a claude-xsync`) — keep one.
+
 ## Quickstart
 
 Create a **private** GitHub repo, then on the first device:
@@ -73,6 +86,7 @@ On the second device (same passphrase):
 set XSYNC_PASSPHRASE=your-long-passphrase   # PowerShell: $env:XSYNC_PASSPHRASE='…'
 claude-xsync init --remote git@github.com:you/claude-state.git --device win
 claude-xsync pull
+claude-xsync app-index   # optional: show the synced sessions in the Claude desktop app
 ```
 
 Recommended: add a note to your synced `~/.claude/CLAUDE.md` so the model
@@ -102,11 +116,23 @@ Other commands:
   `local_*.json` index (`claude-code-sessions/<account>/<org>/` under the
   app's data dir), so pulled sessions work in `claude --resume` but don't
   appear in the app until indexed. This command adds index entries for any
-  top-level session that lacks one — original timestamps and title carried
-  over, existing entries never touched — then you restart the app.
-  `--dry-run` previews. Opt-in and best-effort: the index format is
-  app-private and may change between app versions (macOS/Windows only; the
-  app must have been opened at least once).
+  top-level session that lacks one, then you restart the app. Details:
+  - **Never touches existing entries** (app-created sessions keep their
+    titles) and never lists subagent/tool transcripts. Idempotent.
+  - **Original timestamps carried over** (first/last record → created/last
+    activity), so the app's time ordering matches reality.
+  - **Titles**: custom title record > AI title record > first real user
+    message; slash-command sessions title as `/command args`; sessions with
+    no conversation at all (opened the CLI, ran `/plugin`, quit) are
+    excluded by default — `--all` includes them. `--dry-run` previews.
+  - **Index discovery** handles both Windows app layouts — classic
+    (`%APPDATA%\Claude`) and Microsoft Store/MSIX (virtualized under
+    `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`) — plus
+    macOS (`~/Library/Application Support/Claude`); override with
+    `XSYNC_APP_SESSIONS_DIR`.
+  - Opt-in and best-effort: the index format is app-private and may change
+    between app versions (macOS/Windows only; the app must have been opened
+    at least once).
 
 If you forget to push and edit on both machines, pull classifies per file:
 local-only work is preserved, remote-only changes apply, true conflicts keep your
@@ -168,22 +194,23 @@ unknown top-level entries are reported, never silently synced.
 
 ## Real-machine validation status
 
-> **UNVERIFIED — must be executed on the actual Windows (Loki) machine before
-> calling v1 done.** This environment cannot run it.
+The mac → Windows direction is verified end-to-end on the real two-machine
+setup (2026-07-15/16): push (3,309 files) → pull (0 skipped, 2 expected
+conflicts) → mtime repair (3,297 files, `--resume` ordering restored) →
+`app-index` (254 sessions) → sessions visible and resumable in the Windows
+desktop app, including the app's own missing-cwd folder picker.
 
-- ☑ Windows slash-cwd `claude --resume` works on a pulled session
-  (verified 2026-07-15 on the real Windows machine; the Claude **desktop
-  app** additionally needs `claude-xsync app-index` because its list is
-  driven by a separate private index, not by `~/.claude/projects`)
+Still to verify on real machines:
+
+- ☐ Windows → mac direction (push on win, pull + `app-index` on mac)
 - ☐ checkpoint/rewind works when `trackedFileBackups` keys are slash-form
 - ☐ plugins reinstall after pull
 - ☐ identical behavior from Git Bash and PowerShell (`init`/`push`/`pull`)
-- ☐ `.claude.json` mcp merge leaves login intact
+  (all verification so far ran under Git Bash)
+- ☑ `.claude.json` mcp merge leaves login intact (Windows CLI and desktop app
+  worked normally after the first real pull)
 - ☐ Windows reserved-name file inside `skills/` → pull skips + reports
 - ☐ MAX_PATH-exceeding path handled via `\\?\`
-- If slash-cwd resume fails → implement spec §5 plan B (JSON-string-scoped
-  backslash re-escaping in pull-resolve; the tokenizer already provides the
-  machinery) and re-run this checklist.
 
 The Windows golden fixture is currently synthetic
 (`tests/fixtures/win-session.jsonl`, marked `synthetic-until-real-capture`);
