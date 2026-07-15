@@ -108,10 +108,18 @@ pub fn decode_json_string(raw: &[u8]) -> Result<String, LexError> {
             }
             i += 1;
         } else {
-            let s = std::str::from_utf8(&raw[i..]).map_err(|_| LexError::BadUnicode(i))?;
-            let c = s.chars().next().unwrap();
-            out.push(c);
-            i += c.len_utf8();
+            // Copy the whole escape-free segment at once. Validating
+            // `&raw[i..]` per character re-scans the remaining tail every
+            // iteration — O(n²) — which turned multi-hundred-KB session
+            // strings (base64 tool results) into 20-minute syncs.
+            let end = raw[i..]
+                .iter()
+                .position(|&b| b == b'\\')
+                .map(|p| i + p)
+                .unwrap_or(raw.len());
+            let s = std::str::from_utf8(&raw[i..end]).map_err(|_| LexError::BadUnicode(i))?;
+            out.push_str(s);
+            i = end;
         }
     }
     Ok(out)
@@ -162,6 +170,25 @@ mod tests {
     #[test]
     fn rejects_truncated_line() {
         assert!(string_spans(br#"{"cwd":"/Users/wo"#).is_err());
+    }
+
+    #[test]
+    fn decode_long_mixed_string_roundtrips() {
+        // Real sessions carry multi-hundred-KB strings (base64 tool results);
+        // this pins both correctness (escapes at segment boundaries, Korean)
+        // and the O(n) decode path — the old per-char tail revalidation was
+        // O(n²) and visibly hangs on this input.
+        let mut s = String::with_capacity(600_000);
+        for i in 0..6_000 {
+            s.push_str("chunk-");
+            s.push_str(&i.to_string());
+            s.push_str(" 한글과 base64처럼 긴 내용 QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo= ");
+            s.push('\n');
+            s.push('"');
+            s.push('\t');
+        }
+        let enc = encode_json_string(&s);
+        assert_eq!(decode_json_string(&enc).unwrap(), s);
     }
 
     #[test]
