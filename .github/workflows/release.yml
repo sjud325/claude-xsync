@@ -12,6 +12,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Tag must match Cargo.toml version
+        run: |
+          pkg=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          case "$GITHUB_REF_NAME" in
+            "v$pkg"|"v$pkg"-*) echo "tag $GITHUB_REF_NAME matches package $pkg" ;;
+            *) echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $pkg (binaries would report the wrong --version)"; exit 1 ;;
+          esac
       - name: Create release (idempotent)
         env:
           GH_TOKEN: ${{ github.token }}
