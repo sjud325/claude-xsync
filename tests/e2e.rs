@@ -600,6 +600,137 @@ fn pull_repairs_drifted_mtimes_on_in_sync_files() {
 }
 
 #[test]
+fn app_index_creates_entries_for_unindexed_sessions() {
+    // The desktop app lists only sessions that have a local_*.json entry in
+    // its private index — synced .jsonl files alone never appear. app-index
+    // backfills entries for top-level sessions, template-cloning a native
+    // entry so platform-specific fields carry over.
+    let env = TestEnv::new();
+    let appdir = env.dev_a.home.path().join("appdata/acc-uuid/org-uuid");
+    fs::create_dir_all(&appdir).unwrap();
+
+    let proj = env
+        .dev_a
+        .claude()
+        .join(format!("projects/{}-ws-app", env.dev_a.enc_home()));
+    fs::create_dir_all(&proj).unwrap();
+    let x = "11111111-1111-4111-8111-111111111111"; // already indexed
+    let y = "22222222-2222-4222-8222-222222222222"; // needs an entry
+    let home = json_escape(&env.dev_a.home_str());
+    for (id, title_line) in [
+        (x, String::new()),
+        (
+            y,
+            format!("{{\"type\":\"custom-title\",\"customTitle\":\"와이 세션\",\"sessionId\":\"{y}\"}}\n"),
+        ),
+    ] {
+        let mut s = format!(
+            "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"첫 질문\"}},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"{home}/ws/app\",\"sessionId\":\"{id}\"}}\n"
+        );
+        s.push_str(&title_line);
+        s.push_str(&format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"role\":\"assistant\"}},\"timestamp\":\"2020-01-02T03:04:05.678Z\",\"cwd\":\"{home}/ws/app\",\"sessionId\":\"{id}\"}}\n"
+        ));
+        fs::write(proj.join(format!("{id}.jsonl")), s).unwrap();
+    }
+    // subagent transcripts must never be indexed
+    fs::create_dir_all(proj.join(format!("{y}/subagents"))).unwrap();
+    fs::write(
+        proj.join(format!("{y}/subagents/agent-abc.jsonl")),
+        "{\"type\":\"user\",\"timestamp\":\"2020-01-01T00:00:00.000Z\"}\n",
+    )
+    .unwrap();
+
+    // native template entry for X (session-specific fields must be reset)
+    fs::write(
+        appdir.join("local_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.json"),
+        format!(
+            "{{\"sessionId\":\"local_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\"cliSessionId\":\"{x}\",\"cwd\":\"{home}/ws/app\",\"originCwd\":\"{home}/ws/app\",\"title\":\"X native\",\"titleSource\":\"auto\",\"isArchived\":false,\"createdAt\":1,\"lastActivityAt\":2,\"model\":\"claude-test-model\",\"completedTurns\":7,\"writtenBranches\":[\"main\"]}}"
+        ),
+    )
+    .unwrap();
+
+    let appdir_s = appdir.to_string_lossy().to_string();
+    let hostile: &[(&str, &str)] = &[("XSYNC_APP_SESSIONS_DIR", appdir_s.as_str())];
+    let (c, o) = run_env(&env.dev_a, &["app-index"], hostile);
+    assert_eq!(c, 0, "{o}");
+
+    let entries: Vec<_> = fs::read_dir(&appdir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("local_"))
+        .collect();
+    assert_eq!(entries.len(), 2, "exactly one new entry: {o}");
+
+    let new_entry = entries
+        .iter()
+        .find(|e| !e.file_name().to_string_lossy().contains("aaaaaaaa"))
+        .expect("new index file");
+    let v: serde_json::Value =
+        serde_json::from_slice(&fs::read(new_entry.path()).unwrap()).unwrap();
+    assert_eq!(v["cliSessionId"], y);
+    assert_eq!(
+        format!("{}.json", v["sessionId"].as_str().unwrap()),
+        new_entry.file_name().to_string_lossy()
+    );
+    assert_eq!(v["title"], "와이 세션");
+    assert_eq!(v["titleSource"], "custom");
+    assert_eq!(v["createdAt"], 1_577_836_800_000u64);
+    assert_eq!(v["lastActivityAt"], 1_577_934_245_678u64);
+    assert_eq!(v["model"], "claude-test-model"); // inherited from template
+    assert_eq!(v["completedTurns"], 0); // session-specific fields reset
+    assert_eq!(v["writtenBranches"], serde_json::json!([]));
+    assert_eq!(v["isArchived"], false);
+    assert!(v["cwd"].as_str().unwrap().ends_with("/ws/app"), "{v}");
+
+    // idempotent: second run creates nothing
+    let (c, o) = run_env(&env.dev_a, &["app-index"], hostile);
+    assert_eq!(c, 0, "{o}");
+    let count = fs::read_dir(&appdir).unwrap().flatten().count();
+    assert_eq!(count, 2, "second run must be a no-op: {o}");
+}
+
+#[test]
+fn app_index_without_template_creates_minimal_entry() {
+    let env = TestEnv::new();
+    let appdir = env.dev_a.home.path().join("appdata/acc-uuid/org-uuid");
+    fs::create_dir_all(&appdir).unwrap();
+    let proj = env
+        .dev_a
+        .claude()
+        .join(format!("projects/{}-ws-app", env.dev_a.enc_home()));
+    fs::create_dir_all(&proj).unwrap();
+    let y = "33333333-3333-4333-8333-333333333333";
+    fs::write(
+        proj.join(format!("{y}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"제목 없는 세션의 첫 메시지\"}},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"{}/ws/app\",\"sessionId\":\"{y}\"}}\n",
+            json_escape(&env.dev_a.home_str())
+        ),
+    )
+    .unwrap();
+
+    let appdir_s = appdir.to_string_lossy().to_string();
+    let (c, o) = run_env(
+        &env.dev_a,
+        &["app-index"],
+        &[("XSYNC_APP_SESSIONS_DIR", appdir_s.as_str())],
+    );
+    assert_eq!(c, 0, "{o}");
+    let entry = fs::read_dir(&appdir)
+        .unwrap()
+        .flatten()
+        .next()
+        .expect("entry");
+    let v: serde_json::Value = serde_json::from_slice(&fs::read(entry.path()).unwrap()).unwrap();
+    assert_eq!(v["cliSessionId"], y);
+    // fallback title = first user message
+    assert_eq!(v["title"], "제목 없는 세션의 첫 메시지");
+    assert_eq!(v["createdAt"], 1_577_836_800_000u64);
+    assert_eq!(v["isArchived"], false);
+}
+
+#[test]
 fn rekey_reencrypts_and_squashes_old_key_out() {
     let env = TestEnv::new();
     assert_eq!(env.init(&env.dev_a).0, 0);

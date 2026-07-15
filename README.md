@@ -97,6 +97,16 @@ Other commands:
   large session can add ~30 MB of history per push). The other device
   auto-recovers on its next pull.
 - `claude-xsync rekey` — new passphrase + salt, full re-encrypt, mandatory squash
+- `claude-xsync app-index` — make synced sessions visible in the **Claude
+  desktop app**. The app lists only sessions present in its private
+  `local_*.json` index (`claude-code-sessions/<account>/<org>/` under the
+  app's data dir), so pulled sessions work in `claude --resume` but don't
+  appear in the app until indexed. This command adds index entries for any
+  top-level session that lacks one — original timestamps and title carried
+  over, existing entries never touched — then you restart the app.
+  `--dry-run` previews. Opt-in and best-effort: the index format is
+  app-private and may change between app versions (macOS/Windows only; the
+  app must have been opened at least once).
 
 If you forget to push and edit on both machines, pull classifies per file:
 local-only work is preserved, remote-only changes apply, true conflicts keep your
@@ -161,7 +171,10 @@ unknown top-level entries are reported, never silently synced.
 > **UNVERIFIED — must be executed on the actual Windows (Loki) machine before
 > calling v1 done.** This environment cannot run it.
 
-- ☐ Windows slash-cwd `claude --resume` works on a pulled session
+- ☑ Windows slash-cwd `claude --resume` works on a pulled session
+  (verified 2026-07-15 on the real Windows machine; the Claude **desktop
+  app** additionally needs `claude-xsync app-index` because its list is
+  driven by a separate private index, not by `~/.claude/projects`)
 - ☐ checkpoint/rewind works when `trackedFileBackups` keys are slash-form
 - ☐ plugins reinstall after pull
 - ☐ identical behavior from Git Bash and PowerShell (`init`/`push`/`pull`)

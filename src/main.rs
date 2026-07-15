@@ -47,6 +47,11 @@ enum Cmd {
         #[arg(long, default_value = "XSYNC_NEW_PASSPHRASE")]
         passphrase_env: String,
     },
+    /// Add synced sessions to the Claude desktop app's session list
+    AppIndex {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() {
@@ -58,6 +63,7 @@ fn main() {
         Cmd::Status { offline } => cli::status::run_status(offline),
         Cmd::Gc { squash } => cli::gc::run_gc(squash),
         Cmd::Rekey { passphrase_env } => cli::rekey::run_rekey(passphrase_env),
+        Cmd::AppIndex { dry_run } => cli::app_index::run_app_index(dry_run),
     };
     match result {
         Ok(code) => std::process::exit(code),
