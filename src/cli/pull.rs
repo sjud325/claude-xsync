@@ -106,6 +106,11 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
         .cloned()
         .collect();
 
+    if all_keys.len() >= 500 {
+        println!("classifying {} entries…", all_keys.len());
+    }
+    let mut staged_count = 0usize;
+
     for portable in all_keys {
         let entry = manifest.entries.get(&portable);
         let local = locals.get(&portable);
@@ -133,6 +138,10 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         hash: e.plaintext_hash.clone(),
                     });
                     continue;
+                }
+                staged_count += 1;
+                if staged_count.is_multiple_of(200) {
+                    println!("· {staged_count} remote files staged (decrypt + verify)…");
                 }
                 let bytes = match stage_entry(&repo, &keys, &portable, e, &mapper) {
                     Ok(b) => b,
