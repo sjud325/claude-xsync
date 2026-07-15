@@ -270,24 +270,81 @@ fn build_entry(
 }
 
 /// Locate the app's session-index directory:
-/// `<app data>/Claude/claude-code-sessions/<account>/<org>/`. The account and
-/// org UUIDs are discovered by finding the subdirectory that already holds
-/// `local_*.json` entries (the app must have run at least once).
+/// `<root>/claude-code-sessions/<account>/<org>/`. The account and org UUID
+/// directories are discovered by finding the one holding `local_*.json`
+/// entries (the app must have run at least once).
 fn resolve_app_sessions_dir() -> anyhow::Result<PathBuf> {
     if let Some(d) = std::env::var_os("XSYNC_APP_SESSIONS_DIR") {
         return Ok(PathBuf::from(d));
     }
-    let base = if cfg!(target_os = "windows") {
-        PathBuf::from(std::env::var_os("APPDATA").context("APPDATA is not set")?).join("Claude")
+    let roots = candidate_index_roots()?;
+    best_sessions_dir(&roots)?.with_context(|| {
+        format!(
+            "no Claude app session index found (searched {}) — open the Claude desktop app once, then retry",
+            roots
+                .iter()
+                .map(|r| r.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })
+}
+
+/// Roots that may contain `claude-code-sessions/<account>/<org>/local_*.json`.
+/// Windows ships two app layouts: the classic installer writes
+/// `%APPDATA%\Claude` directly, while the Microsoft Store (MSIX) build
+/// virtualizes `%APPDATA%` into
+/// `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`.
+fn candidate_index_roots() -> anyhow::Result<Vec<PathBuf>> {
+    let mut roots = Vec::new();
+    if cfg!(target_os = "windows") {
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            roots.push(
+                PathBuf::from(appdata)
+                    .join("Claude")
+                    .join("claude-code-sessions"),
+            );
+        }
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            if let Ok(rd) = std::fs::read_dir(PathBuf::from(local).join("Packages")) {
+                for e in rd.flatten() {
+                    if e.file_name().to_string_lossy().starts_with("Claude_") {
+                        roots.push(
+                            e.path()
+                                .join("LocalCache")
+                                .join("Roaming")
+                                .join("Claude")
+                                .join("claude-code-sessions"),
+                        );
+                    }
+                }
+            }
+        }
+        if roots.is_empty() {
+            anyhow::bail!("neither APPDATA nor LOCALAPPDATA is set");
+        }
     } else if cfg!(target_os = "macos") {
-        config::home_dir().join("Library/Application Support/Claude")
+        roots.push(
+            config::home_dir().join("Library/Application Support/Claude/claude-code-sessions"),
+        );
     } else {
         anyhow::bail!("app-index only supports the Claude desktop app on Windows and macOS");
-    };
-    let root = base.join("claude-code-sessions");
+    }
+    Ok(roots)
+}
+
+/// Across all candidate roots, pick the `<account>/<org>` directory holding
+/// the most `local_*.json` entries. A fresh app install may have the UUID
+/// directories with no sessions yet — accept those as a fallback (the
+/// minimal-entry path needs no template).
+fn best_sessions_dir(roots: &[PathBuf]) -> anyhow::Result<Option<PathBuf>> {
     let mut best: Option<(usize, PathBuf)> = None;
-    if root.is_dir() {
-        for acc in std::fs::read_dir(&root)?.flatten() {
+    let mut empty_fallback: Option<PathBuf> = None;
+    for root in roots {
+        if !root.is_dir() {
+            continue;
+        }
+        for acc in std::fs::read_dir(root)?.flatten() {
             if !acc.path().is_dir() {
                 continue;
             }
@@ -302,18 +359,20 @@ fn resolve_app_sessions_dir() -> anyhow::Result<PathBuf> {
                         name.starts_with("local_") && name.ends_with(".json")
                     })
                     .count();
-                if n > 0 && best.as_ref().is_none_or(|(b, _)| n > *b) {
-                    best = Some((n, org.path()));
+                if n > 0 {
+                    if best.as_ref().is_none_or(|(b, _)| n > *b) {
+                        best = Some((n, org.path()));
+                    }
+                } else if empty_fallback.is_none()
+                    && is_uuid_name(&acc.file_name().to_string_lossy())
+                    && is_uuid_name(&org.file_name().to_string_lossy())
+                {
+                    empty_fallback = Some(org.path());
                 }
             }
         }
     }
-    best.map(|(_, p)| p).with_context(|| {
-        format!(
-            "no Claude app session index found under {} — open the Claude desktop app once, then retry",
-            root.display()
-        )
-    })
+    Ok(best.map(|(_, p)| p).or(empty_fallback))
 }
 
 fn is_uuid_name(stem: &str) -> bool {
@@ -440,6 +499,44 @@ mod tests {
         assert!(!is_uuid_name("s"));
         assert!(!is_uuid_name("agent-abc"));
         assert!(!is_uuid_name("11ae1b5f-3755-4863-9dc2-b59847edd7aa.bak"));
+    }
+
+    #[test]
+    fn best_sessions_dir_prefers_populated_org_across_roots() {
+        let td = tempfile::tempdir().unwrap();
+        // classic root exists but holds nothing
+        let classic = td.path().join("Roaming/Claude/claude-code-sessions");
+        std::fs::create_dir_all(&classic).unwrap();
+        // Store-virtualized root has a populated <account>/<org>
+        let store = td
+            .path()
+            .join("Packages/Claude_x/LocalCache/Roaming/Claude/claude-code-sessions");
+        let orgdir = store
+            .join("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            .join("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        std::fs::create_dir_all(&orgdir).unwrap();
+        std::fs::write(orgdir.join("local_1.json"), b"{}").unwrap();
+        std::fs::write(orgdir.join("local_2.json"), b"{}").unwrap();
+        let got = best_sessions_dir(&[classic, store]).unwrap();
+        assert_eq!(got, Some(orgdir));
+    }
+
+    #[test]
+    fn best_sessions_dir_falls_back_to_empty_uuid_dirs() {
+        // fresh app install: <account>/<org> exists but has no sessions yet
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path().join("claude-code-sessions");
+        let org = root
+            .join("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+            .join("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+        std::fs::create_dir_all(&org).unwrap();
+        // non-UUID two-level junk must never be picked
+        std::fs::create_dir_all(root.join("cache/blobs")).unwrap();
+        assert_eq!(best_sessions_dir(&[root]).unwrap(), Some(org));
+        assert_eq!(
+            best_sessions_dir(&[td.path().join("missing")]).unwrap(),
+            None
+        );
     }
 
     #[test]
