@@ -58,14 +58,27 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         .unwrap_or_default();
     let mut pending_state: Vec<(String, String)> = Vec::new();
 
+    // age is non-deterministic; the portable-payload hash is the identity
+    let unchanged: std::collections::BTreeSet<String> = locals
+        .iter()
+        .filter(|(portable, lf)| {
+            st.files.get(*portable) == Some(&lf.portable_hash)
+                && entries
+                    .get(*portable)
+                    .map(|e| e.plaintext_hash == lf.portable_hash)
+                    .unwrap_or(false)
+        })
+        .map(|(portable, _)| portable.clone())
+        .collect();
+    let to_seal = locals.len() - unchanged.len();
+    if to_seal > 0 && !opts.dry_run {
+        println!("sealing {to_seal} changed files…");
+    }
+    let mut sealed_count = 0usize;
+
     for (portable, lf) in &locals {
-        let unchanged = st.files.get(portable) == Some(&lf.portable_hash)
-            && entries
-                .get(portable)
-                .map(|e| e.plaintext_hash == lf.portable_hash)
-                .unwrap_or(false);
-        if unchanged {
-            continue; // age is non-deterministic; the portable-payload hash is the identity
+        if unchanged.contains(portable) {
+            continue;
         }
         // Never overwrite a manifest entry that moved past our anchor — the
         // remote version is newer than what this device last synced (e.g. a
@@ -93,11 +106,19 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
             continue;
         }
         let object = object_name(&keys.hmac_key, portable);
-        remove_object_files(&repo, &object)?;
+        // drop the previous entry's chunk files (covers shrinking chunk
+        // counts); scanning the whole objects dir per file was O(N²)
+        if let Some(old) = entries.get(portable) {
+            remove_entry_objects(&repo, old)?;
+        }
         let sealed = crate::crypto::seal(&lf.payload, &keys.recipient);
         let chunks = split_chunks(&sealed);
         for (chunk, rel) in chunks.iter().zip(chunk_paths(&object, chunks.len() as u32)) {
             crate::fsx::atomic_write(&repo.join(rel), chunk)?;
+        }
+        sealed_count += 1;
+        if sealed_count.is_multiple_of(200) {
+            println!("· {sealed_count}/{to_seal} sealed");
         }
         entries.insert(
             portable.clone(),
@@ -134,7 +155,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     if !opts.dry_run {
         for portable in &deletions {
             if let Some(entry) = entries.remove(portable) {
-                remove_object_files(&repo, &entry.object)?;
+                remove_entry_objects(&repo, &entry)?;
             }
         }
     }
@@ -158,6 +179,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
                 entries,
             },
         )?;
+        println!("uploading to remote…");
         git.commit_all(&format!("xsync push from {}", cfg.device))?;
         git.push()?;
 
@@ -175,17 +197,13 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     Ok(summary.exit_code())
 }
 
-/// Drop every `objects/<object>.age*` file (stale chunk cleanup before rewrite).
-fn remove_object_files(repo: &std::path::Path, object: &str) -> anyhow::Result<()> {
-    let dir = repo.join("objects");
-    let Ok(rd) = std::fs::read_dir(&dir) else {
-        return Ok(());
-    };
-    let prefix = format!("{object}.age");
-    for entry in rd.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == prefix || name.starts_with(&format!("{prefix}.")) {
-            std::fs::remove_file(entry.path())?;
+/// Drop exactly the chunk files a manifest entry owns — O(chunks), not a
+/// directory scan.
+fn remove_entry_objects(repo: &std::path::Path, entry: &Entry) -> anyhow::Result<()> {
+    for rel in chunk_paths(&entry.object, entry.chunks) {
+        let p = repo.join(&rel);
+        if p.exists() {
+            std::fs::remove_file(&p)?;
         }
     }
     Ok(())

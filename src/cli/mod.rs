@@ -188,12 +188,19 @@ pub fn collect_locals(
     };
 
     let scanres = crate::scan::scan(claude_dir, cfg)?;
-    for (rel, path) in &scanres.files {
+    let total = scanres.files.len();
+    if total >= 500 {
+        println!("transforming {total} files…");
+    }
+    for (i, (rel, path)) in scanres.files.iter().enumerate() {
         add(
             rel_to_portable(rel, mapper),
             Some(rel.clone()),
             std::fs::read(path)?,
         );
+        if total >= 500 && (i + 1).is_multiple_of(1000) {
+            println!("· {}/{total} transformed", i + 1);
+        }
     }
     for rel in crate::special::plugins::plugin_manifest_rels(&claude_dir.join("plugins")) {
         let raw = std::fs::read(claude_dir.join(&rel))?;

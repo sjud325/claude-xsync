@@ -24,6 +24,16 @@ fn is_run_char(c: char) -> bool {
         || !c.is_ascii()
 }
 
+/// Allocation-free case-insensitive char equality. This sits in the hottest
+/// loop of the whole tool (every byte position of every string is a match
+/// attempt) — heap-allocating here turns big pushes into half-hour stalls.
+#[inline]
+fn char_eq_ci(a: char, b: char) -> bool {
+    a == b
+        || a.eq_ignore_ascii_case(&b)
+        || (!a.is_ascii() && !b.is_ascii() && a.to_lowercase().eq(b.to_lowercase()))
+}
+
 /// Case-insensitive prefix match of `local` (with both separator variants)
 /// at `pos`; returns matched length in bytes if boundary holds.
 fn match_local_at(text: &str, pos: usize, local: &str) -> Option<usize> {
@@ -33,7 +43,7 @@ fn match_local_at(text: &str, pos: usize, local: &str) -> Option<usize> {
     for lc in local.chars() {
         let rc = ri.next()?;
         let sep_ok = matches!(lc, '/' | '\\') && matches!(rc, '/' | '\\');
-        if !sep_ok && rc.to_lowercase().to_string() != lc.to_lowercase().to_string() {
+        if !sep_ok && !char_eq_ci(rc, lc) {
             return None;
         }
         matched += rc.len_utf8();
