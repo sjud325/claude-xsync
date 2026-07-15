@@ -51,6 +51,9 @@ enum Cmd {
     AppIndex {
         #[arg(long)]
         dry_run: bool,
+        /// Also index command-only sessions (no conversation content)
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -63,7 +66,7 @@ fn main() {
         Cmd::Status { offline } => cli::status::run_status(offline),
         Cmd::Gc { squash } => cli::gc::run_gc(squash),
         Cmd::Rekey { passphrase_env } => cli::rekey::run_rekey(passphrase_env),
-        Cmd::AppIndex { dry_run } => cli::app_index::run_app_index(dry_run),
+        Cmd::AppIndex { dry_run, all } => cli::app_index::run_app_index(dry_run, all),
     };
     match result {
         Ok(code) => std::process::exit(code),

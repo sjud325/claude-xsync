@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 
-pub fn run_app_index(dry_run: bool) -> anyhow::Result<i32> {
+pub fn run_app_index(dry_run: bool, all: bool) -> anyhow::Result<i32> {
     let sessions_dir = resolve_app_sessions_dir()?;
 
     // Scan the existing index: which cliSessionIds are already listed, and
@@ -82,6 +82,7 @@ pub fn run_app_index(dry_run: bool) -> anyhow::Result<i32> {
     let total = to_index.len();
     let mut created = 0usize;
     let mut skipped = 0usize;
+    let mut command_only = 0usize;
     for (i, path) in to_index.iter().enumerate() {
         if i > 0 && i % 200 == 0 {
             println!("  … scanned {i}/{total} sessions");
@@ -102,6 +103,15 @@ pub fn run_app_index(dry_run: bool) -> anyhow::Result<i32> {
                 continue;
             }
         };
+        // Sessions with no real conversation — someone opened the CLI, ran a
+        // slash command, and quit — would clutter the app list.
+        if meta.command_only && !all {
+            if dry_run {
+                println!("  would exclude command-only session: {stem}");
+            }
+            command_only += 1;
+            continue;
+        }
         if dry_run {
             println!("  would index: {} ({stem})", meta.title);
             created += 1;
@@ -127,6 +137,9 @@ pub fn run_app_index(dry_run: bool) -> anyhow::Result<i32> {
         println!("✓ indexed {created} sessions into the Claude app list ({already} already indexed, {skipped} skipped)");
         println!("  restart the Claude desktop app to see them");
     }
+    if command_only > 0 {
+        println!("  excluded {command_only} command-only sessions with no conversation (--all to include)");
+    }
     Ok(0)
 }
 
@@ -136,6 +149,9 @@ struct SessionMeta {
     created_ms: u64,
     last_ms: u64,
     cwd: String,
+    /// No real user message and no title record — a slash-command-only
+    /// session (e.g. open CLI, run `/plugin`, quit).
+    command_only: bool,
 }
 
 /// Stream a session .jsonl once: first/last record timestamps, cwd, and the
@@ -151,7 +167,9 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
     let mut cwd: Option<String> = None;
     let mut title: Option<String> = None;
     let mut fallback_title: Option<String> = None;
+    let mut command_fallback: Option<String> = None;
     let mut raw_fallback: Option<String> = None;
+    let mut has_content = false;
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 {
@@ -202,6 +220,14 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
                         raw_fallback = raw_fallback.or(Some(short.clone()));
                         if !is_boilerplate_message(&t) {
                             fallback_title = Some(short);
+                            has_content = true;
+                        } else if !is_local_command_noise(&t) {
+                            // skill invocation or compaction continuation —
+                            // a real session even without plain user text
+                            has_content = true;
+                            if command_fallback.is_none() {
+                                command_fallback = command_title(&t);
+                            }
                         }
                     }
                 }
@@ -212,8 +238,13 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
     let (Some(created_ms), Some(last_ms), Some(cwd)) = (created, last, cwd) else {
         return Ok(None); // empty or unrecognizable transcript
     };
+    let command_only = title.is_none() && !has_content;
     // titleSource "custom" pins the title so the app never regenerates it.
-    let (title, title_source) = match title.or(fallback_title).or(raw_fallback) {
+    let (title, title_source) = match title
+        .or(fallback_title)
+        .or(command_fallback)
+        .or(raw_fallback)
+    {
         Some(t) => (t, "custom"),
         None => ("Untitled session".to_string(), "custom"),
     };
@@ -223,6 +254,7 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
         created_ms,
         last_ms,
         cwd,
+        command_only,
     }))
 }
 
@@ -234,6 +266,38 @@ fn is_boilerplate_message(t: &str) -> bool {
     t.starts_with('<') // <local-command-caveat>, <command-message>, …
         || t.starts_with("This session is being continued")
         || t.starts_with("Caveat:")
+        || t.starts_with("Base directory for this skill:") // skill-content injection
+}
+
+/// Records emitted when the user runs a local command (`/plugin`, `!ls`, …):
+/// the caveat header plus command stdout wrappers. A session made ONLY of
+/// these has no conversation to show.
+fn is_local_command_noise(t: &str) -> bool {
+    t.starts_with("<local-command") || t.starts_with("Caveat:")
+}
+
+/// Derive a title from a slash-command wrapper:
+/// `<command-name>/goal</command-name><command-args>build X</command-args>`
+/// → `/goal build X`.
+fn command_title(t: &str) -> Option<String> {
+    let name = t
+        .split("<command-name>")
+        .nth(1)?
+        .split("</command-name>")
+        .next()?
+        .trim();
+    if name.is_empty() {
+        return None;
+    }
+    let args = t
+        .split("<command-args>")
+        .nth(1)
+        .and_then(|s| s.split("</command-args>").next())
+        .unwrap_or("")
+        .trim();
+    let joined = format!("{name} {args}");
+    let joined = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+    Some(joined.chars().take(60).collect())
 }
 
 fn build_entry(
@@ -544,6 +608,35 @@ mod tests {
             "{}",
             m2.title
         );
+    }
+
+    #[test]
+    fn command_only_sessions_are_flagged_but_skill_sessions_are_not() {
+        let td = tempfile::tempdir().unwrap();
+        // /plugin-style: caveat + local-command records only → command_only
+        let p = td.path().join("cmd.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<local-command-caveat>Caveat: The messages below were generated…\"},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<local-command-stdout>plugins listed</local-command-stdout>\"},\"timestamp\":\"2020-01-01T00:00:05.000Z\",\"cwd\":\"/h/ws\"}\n",
+            ),
+        )
+        .unwrap();
+        let m = extract_session_meta(&p).unwrap().unwrap();
+        assert!(m.command_only);
+
+        // /goal-style skill invocation with no plain user text → real session
+        // titled from the command wrapper
+        let p2 = td.path().join("skill.jsonl");
+        std::fs::write(
+            &p2,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<command-message>goal is running…</command-message><command-name>/goal</command-name><command-args>클로드 싱크 v1 구현</command-args>\"},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+        )
+        .unwrap();
+        let m2 = extract_session_meta(&p2).unwrap().unwrap();
+        assert!(!m2.command_only);
+        assert_eq!(m2.title, "/goal 클로드 싱크 v1 구현");
     }
 
     #[test]
