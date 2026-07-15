@@ -151,6 +151,7 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
     let mut cwd: Option<String> = None;
     let mut title: Option<String> = None;
     let mut fallback_title: Option<String> = None;
+    let mut raw_fallback: Option<String> = None;
     loop {
         line.clear();
         if reader.read_line(&mut line)? == 0 {
@@ -197,7 +198,11 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
                 if let Some(t) = text {
                     let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
                     if !t.is_empty() {
-                        fallback_title = Some(t.chars().take(60).collect());
+                        let short: String = t.chars().take(60).collect();
+                        raw_fallback = raw_fallback.or(Some(short.clone()));
+                        if !is_boilerplate_message(&t) {
+                            fallback_title = Some(short);
+                        }
                     }
                 }
             }
@@ -208,7 +213,7 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
         return Ok(None); // empty or unrecognizable transcript
     };
     // titleSource "custom" pins the title so the app never regenerates it.
-    let (title, title_source) = match title.or(fallback_title) {
+    let (title, title_source) = match title.or(fallback_title).or(raw_fallback) {
         Some(t) => (t, "custom"),
         None => ("Untitled session".to_string(), "custom"),
     };
@@ -219,6 +224,16 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
         last_ms,
         cwd,
     }))
+}
+
+/// Harness-inserted user records that make terrible titles: slash-command
+/// wrappers, local-command caveats, and compaction-continuation summaries.
+/// Skipped in favor of the first real user message (kept as a last resort
+/// when a session contains nothing else).
+fn is_boilerplate_message(t: &str) -> bool {
+    t.starts_with('<') // <local-command-caveat>, <command-message>, …
+        || t.starts_with("This session is being continued")
+        || t.starts_with("Caveat:")
 }
 
 fn build_entry(
@@ -499,6 +514,36 @@ mod tests {
         assert!(!is_uuid_name("s"));
         assert!(!is_uuid_name("agent-abc"));
         assert!(!is_uuid_name("11ae1b5f-3755-4863-9dc2-b59847edd7aa.bak"));
+    }
+
+    #[test]
+    fn fallback_title_skips_harness_boilerplate() {
+        let td = tempfile::tempdir().unwrap();
+        let p = td.path().join("s.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<local-command-caveat>Caveat: The messages below were generated…\"},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"진짜 첫 질문입니다\"},\"timestamp\":\"2020-01-01T00:01:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+            ),
+        )
+        .unwrap();
+        let m = extract_session_meta(&p).unwrap().unwrap();
+        assert_eq!(m.title, "진짜 첫 질문입니다");
+
+        // a session with ONLY boilerplate still gets a title (last resort)
+        let p2 = td.path().join("s2.jsonl");
+        std::fs::write(
+            &p2,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"This session is being continued from a previous conversation…\"},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+        )
+        .unwrap();
+        let m2 = extract_session_meta(&p2).unwrap().unwrap();
+        assert!(
+            m2.title.starts_with("This session is being continued"),
+            "{}",
+            m2.title
+        );
     }
 
     #[test]
