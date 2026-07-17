@@ -73,6 +73,7 @@ pub fn scan(claude_dir: &Path, cfg: &Config) -> anyhow::Result<ScanResult> {
             && !name.starts_with(".last-")
             && name != ".xsync-backups"
             && name != ".DS_Store"
+            && !is_conflict_copy(&name)
         {
             unknown.push(name);
         }
@@ -82,12 +83,18 @@ pub fn scan(claude_dir: &Path, cfg: &Config) -> anyhow::Result<ScanResult> {
     Ok(ScanResult { files, unknown })
 }
 
+/// Conflict copies written by pull stay strictly machine-local: syncing them
+/// would spray every device with each other's superseded versions.
+pub fn is_conflict_copy(name: &str) -> bool {
+    name.contains(".xsync-conflict.")
+}
+
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         let ft = entry.file_type()?;
-        if ft.is_symlink() || name == ".DS_Store" {
+        if ft.is_symlink() || name == ".DS_Store" || is_conflict_copy(&name) {
             continue;
         }
         let rel = format!("{prefix}/{name}");

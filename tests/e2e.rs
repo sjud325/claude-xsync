@@ -600,6 +600,61 @@ fn pull_repairs_drifted_mtimes_on_in_sync_files() {
 }
 
 #[test]
+fn conflict_copies_are_never_collected_for_push() {
+    // Real-machine find (2026-07-17, third device): .xsync-conflict copies
+    // created inside wholesale-synced dirs (plugins/, projects/) were being
+    // picked up by the next push and propagated to every device; top-level
+    // copies spammed the unknown-entry warning.
+    let env = TestEnv::new();
+    fs::create_dir_all(env.dev_a.claude().join("plugins")).unwrap();
+    fs::write(
+        env.dev_a.claude().join("plugins/marketplaces.json"),
+        b"{\"a\":1}",
+    )
+    .unwrap();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_b pre-exists with DIFFERENT copies of the same files → conflicts
+    fs::create_dir_all(env.dev_b.claude().join("plugins")).unwrap();
+    fs::write(
+        env.dev_b.claude().join("plugins/marketplaces.json"),
+        b"{\"b\":2}",
+    )
+    .unwrap();
+    let projb = env
+        .dev_b
+        .claude()
+        .join(format!("projects/{}-ws-app", env.dev_b.enc_home()));
+    fs::create_dir_all(&projb).unwrap();
+    fs::write(projb.join("s.jsonl"), b"{\"local\":\"divergent\"}\n").unwrap();
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("conflict"), "{o}");
+
+    // the conflict copies exist on disk…
+    let has_copy = |dir: &std::path::Path| {
+        fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .any(|e| e.file_name().to_string_lossy().contains(".xsync-conflict."))
+    };
+    assert!(has_copy(&env.dev_b.claude().join("plugins")));
+    assert!(has_copy(&projb));
+    assert!(has_copy(&env.dev_b.claude())); // settings.json conflict at top level
+
+    // …but a push must neither ship them nor warn about them
+    let (c, o) = run(&env.dev_b, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("xsync-conflict"),
+        "conflict copies leaked into push: {o}"
+    );
+}
+
+#[test]
 fn init_inserts_multi_device_note_on_first_device_only() {
     let env = TestEnv::new();
     // first device (empty remote): note inserted

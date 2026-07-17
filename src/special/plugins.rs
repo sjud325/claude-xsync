@@ -12,6 +12,7 @@ pub fn plugin_manifest_rels(plugins_dir: &Path) -> Vec<String> {
     let mut rels: Vec<String> = rd
         .flatten()
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter(|e| !crate::scan::is_conflict_copy(&e.file_name().to_string_lossy()))
         .map(|e| format!("plugins/{}", e.file_name().to_string_lossy()))
         .collect();
     rels.sort();
