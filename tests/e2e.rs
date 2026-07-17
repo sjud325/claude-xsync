@@ -718,6 +718,55 @@ fn init_no_claude_md_opts_out() {
 }
 
 #[test]
+fn pull_auto_runs_app_index_when_config_enabled() {
+    let env = TestEnv::new();
+    // dev_a has one UUID-named session to sync
+    let proj = env
+        .dev_a
+        .claude()
+        .join(format!("projects/{}-ws-app", env.dev_a.enc_home()));
+    fs::create_dir_all(&proj).unwrap();
+    let sid = "44444444-4444-4444-8444-444444444444";
+    fs::write(
+        proj.join(format!("{sid}.jsonl")),
+        format!(
+            "{{\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":\"자동 인덱스 테스트\"}},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"{}/ws/app\",\"sessionId\":\"{sid}\"}}\n",
+            json_escape(&env.dev_a.home_str())
+        ),
+    )
+    .unwrap();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_b opts in via config
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let cfg_path = env.dev_b.xsync().join("config.toml");
+    let cfg_text = fs::read_to_string(&cfg_path).unwrap().replace(
+        "app_index_after_pull = false",
+        "app_index_after_pull = true",
+    );
+    assert!(cfg_text.contains("app_index_after_pull = true"));
+    fs::write(&cfg_path, cfg_text).unwrap();
+
+    let appdir = env.dev_b.home.path().join("appdata/acc/org");
+    fs::create_dir_all(&appdir).unwrap();
+    let appdir_s = appdir.to_string_lossy().to_string();
+    let (c, o) = run_env(
+        &env.dev_b,
+        &["pull"],
+        &[("XSYNC_APP_SESSIONS_DIR", appdir_s.as_str())],
+    );
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("indexed 1 sessions"), "{o}");
+    let created: Vec<_> = fs::read_dir(&appdir).unwrap().flatten().collect();
+    assert_eq!(created.len(), 1, "{o}");
+
+    // without the flag (dev_a pulling) nothing app-related happens — every
+    // other pull e2e in this suite implicitly covers the silent-skip path
+}
+
+#[test]
 fn app_index_creates_entries_for_unindexed_sessions() {
     // The desktop app lists only sessions that have a local_*.json entry in
     // its private index — synced .jsonl files alone never appear. app-index

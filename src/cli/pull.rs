@@ -356,6 +356,9 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     st.last_synced_commit = Some(git.head()?);
     state::save_state(&st)?;
     summary.print();
+    if cfg.app_index_after_pull {
+        crate::cli::app_index::run_app_index_best_effort();
+    }
     Ok(summary.exit_code())
 }
 

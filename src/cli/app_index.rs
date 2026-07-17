@@ -18,13 +18,28 @@ use crate::config;
 
 pub fn run_app_index(dry_run: bool, all: bool) -> anyhow::Result<i32> {
     let sessions_dir = resolve_app_sessions_dir()?;
+    index_sessions(&sessions_dir, dry_run, all)
+}
 
+/// After-pull hook (config `app_index_after_pull = true`). The index is
+/// cosmetic, so this must never fail the pull: machines without the desktop
+/// app skip silently, anything else degrades to a warning.
+pub fn run_app_index_best_effort() {
+    let Ok(sessions_dir) = resolve_app_sessions_dir() else {
+        return; // no desktop app on this machine
+    };
+    if let Err(e) = index_sessions(&sessions_dir, false, false) {
+        eprintln!("⚠ app-index step skipped: {e:#}");
+    }
+}
+
+fn index_sessions(sessions_dir: &Path, dry_run: bool, all: bool) -> anyhow::Result<i32> {
     // Scan the existing index: which cliSessionIds are already listed, and
     // the most recently active entry to use as a field template.
     let mut indexed: BTreeSet<String> = BTreeSet::new();
     let mut template: Option<(u64, serde_json::Value)> = None;
     if sessions_dir.is_dir() {
-        for f in std::fs::read_dir(&sessions_dir)?.flatten() {
+        for f in std::fs::read_dir(sessions_dir)?.flatten() {
             let name = f.file_name().to_string_lossy().to_string();
             if !(name.starts_with("local_") && name.ends_with(".json")) {
                 continue;
@@ -119,7 +134,7 @@ pub fn run_app_index(dry_run: bool, all: bool) -> anyhow::Result<i32> {
         }
         let uuid = uuid_v4()?;
         let entry = build_entry(template.as_ref().map(|(_, v)| v), stem, &meta, &uuid);
-        std::fs::create_dir_all(&sessions_dir)?;
+        std::fs::create_dir_all(sessions_dir)?;
         crate::fsx::atomic_write(
             &sessions_dir.join(format!("local_{uuid}.json")),
             serde_json::to_string(&entry)?.as_bytes(),
@@ -263,10 +278,11 @@ fn extract_session_meta(path: &Path) -> anyhow::Result<Option<SessionMeta>> {
 /// Skipped in favor of the first real user message (kept as a last resort
 /// when a session contains nothing else).
 fn is_boilerplate_message(t: &str) -> bool {
-    t.starts_with('<') // <local-command-caveat>, <command-message>, …
+    t.starts_with('<') // <local-command-caveat>, <command-message>, <ide_opened_file>, …
         || t.starts_with("This session is being continued")
         || t.starts_with("Caveat:")
         || t.starts_with("Base directory for this skill:") // skill-content injection
+        || t.starts_with("[Request interrupted") // harness interruption marker
 }
 
 /// Records emitted when the user runs a local command (`/plugin`, `!ls`, …):
@@ -594,6 +610,19 @@ mod tests {
         .unwrap();
         let m = extract_session_meta(&p).unwrap().unwrap();
         assert_eq!(m.title, "진짜 첫 질문입니다");
+
+        // interruption markers also yield to the next real message
+        let p3 = td.path().join("s3.jsonl");
+        std::fs::write(
+            &p3,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"[Request interrupted by user]\"},\"timestamp\":\"2020-01-01T00:00:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"중단 후 진짜 질문\"},\"timestamp\":\"2020-01-01T00:01:00.000Z\",\"cwd\":\"/h/ws\"}\n",
+            ),
+        )
+        .unwrap();
+        let m3 = extract_session_meta(&p3).unwrap().unwrap();
+        assert_eq!(m3.title, "중단 후 진짜 질문");
 
         // a session with ONLY boilerplate still gets a title (last resort)
         let p2 = td.path().join("s2.jsonl");

@@ -25,6 +25,11 @@ pub struct Config {
     /// Env var name holding the passphrase (set by `init --passphrase-env`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub passphrase_env: Option<String>,
+    /// Refresh the desktop app's session index after every successful pull.
+    /// Best-effort: machines without the app skip silently, and an indexing
+    /// failure never fails the pull.
+    #[serde(default)]
+    pub app_index_after_pull: bool,
 }
 
 pub fn claude_dir() -> PathBuf {

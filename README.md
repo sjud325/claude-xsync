@@ -135,6 +135,10 @@ Other commands:
   - Opt-in and best-effort: the index format is app-private and may change
     between app versions (macOS/Windows only; the app must have been opened
     at least once).
+  - To run it automatically after every pull, set
+    `app_index_after_pull = true` in `~/.claude-xsync/config.toml`. Still
+    best-effort: machines without the app skip silently, and an indexing
+    failure never fails the pull.
 
 If you forget to push and edit on both machines, pull classifies per file:
 local-only work is preserved, remote-only changes apply, true conflicts keep your
