@@ -64,8 +64,11 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.10-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.14-alpha claude-xsync
 ```
+
+(Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
+page — the one above may have been superseded.)
 
 Check with `claude-xsync --version`. If you have installed both ways, PATH
 order decides which one runs (`which -a claude-xsync`) — keep one.
@@ -89,6 +92,10 @@ claude-xsync pull
 claude-xsync app-index   # optional: show the synced sessions in the Claude desktop app
 ```
 
+To make the `app-index` step automatic, set `app_index_after_pull = true` in
+`~/.claude-xsync/config.toml` — every pull then refreshes the desktop app's
+session list by itself (details under `app-index` below).
+
 `init` on the first device also adds a **multi-device note** to your synced
 `~/.claude/CLAUDE.md` (marker-delimited managed block) so that sessions
 resumed on the other machine know to trust the current environment over
@@ -111,8 +118,9 @@ Other commands:
   auto-recovers on its next pull.
 - `claude-xsync rekey` — new passphrase + salt, full re-encrypt, mandatory squash
 - `claude-xsync claude-md` — insert the multi-device resume note into
-  `~/.claude/CLAUDE.md` (for setups initialized before this existed;
-  idempotent, run on one device then push)
+  `~/.claude/CLAUDE.md`, or refresh a stale block in place between its
+  markers (for setups initialized before this existed, or after upgrades
+  that changed the note text; idempotent, run on one device then push)
 - `claude-xsync app-index` — make synced sessions visible in the **Claude
   desktop app**. The app lists only sessions present in its private
   `local_*.json` index (`claude-code-sessions/<account>/<org>/` under the
@@ -200,15 +208,20 @@ unknown top-level entries are reported, never silently synced.
 
 ## Real-machine validation status
 
-Both directions are verified end-to-end on the real two-machine setup
-(2026-07-15/16). mac → Windows: push (3,309 files) → pull (0 skipped,
-2 expected conflicts) → mtime repair (3,297 files, `--resume` ordering
-restored) → `app-index` (254 sessions) → sessions visible and resumable in
-the Windows desktop app, including the app's own missing-cwd folder picker.
-Windows → mac: a session resumed and extended on Windows pushed back (34
-files incl. its subagent transcripts and the managed CLAUDE.md note) and
-applied cleanly on the mac (0 conflicts, paths and dir keys re-localized,
-`app-index` added 79 sessions alongside 188 native ones).
+Both directions are verified end-to-end on the real setup — now three
+machines (2026-07-15/17). mac → Windows: push (3,309 files) → pull (0
+skipped, 2 expected conflicts) → mtime repair (3,297 files, `--resume`
+ordering restored) → `app-index` (254 sessions) → sessions visible and
+resumable in the Windows desktop app, including the app's own missing-cwd
+folder picker. Windows → mac: a session resumed and extended on Windows
+pushed back (34 files incl. its subagent transcripts and the managed
+CLAUDE.md note) and applied cleanly on the mac (0 conflicts, paths and dir
+keys re-localized, `app-index` added 79 sessions alongside 188 native ones).
+Third device joining the hub (2026-07-17): a second Windows machine with
+pre-existing `~/.claude` data pulled 3,124 files with 7 expected conflicts
+(old local copies kept as `.xsync-conflict.*`; CLAUDE.md/MEMORY.md merged
+from them by hand), pushed 1,341 files back, and `app-index` added 290
+sessions.
 
 Still to verify on real machines:
 

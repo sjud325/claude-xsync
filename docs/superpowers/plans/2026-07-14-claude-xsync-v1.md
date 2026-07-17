@@ -1160,11 +1160,11 @@ fn squash_recovery() { /* A: gc --squash (Task 13 stub: direct git force-push he
 ## Post-plan: real-machine validation checklist (release gate, from spec §9.4)
 
 Not tasks — a manual gate before calling v1 done, run on the actual Loki machine:
-- ☐ Windows slash-cwd `claude --resume` works on a pulled session
+- ☑ Windows slash-cwd `claude --resume` works on a pulled session (verified 2026-07-15/16 on the real Windows machine; resumed session extended and pushed back)
 - ☐ checkpoint/rewind works when `trackedFileBackups` keys are slash-form
 - ☐ plugins reinstall after pull
 - ☐ identical behavior from Git Bash and PowerShell (`init`/`push`/`pull` each)
-- ☐ `.claude.json` mcp merge leaves login intact
+- ☑ `.claude.json` mcp merge leaves login intact (verified 2026-07-15 — Windows CLI and desktop app worked normally after the first real pull)
 - ☐ Windows reserved-name file inside skills/ → pull skips + reports
 - ☐ MAX_PATH-exceeding path handled via `\\?\`
 - If slash-cwd resume FAILS → implement spec §5 plan B (JSON-string-scoped backslash re-escaping in pull-resolve; the tokenizer already provides the machinery) and re-run this checklist.
