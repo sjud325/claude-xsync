@@ -47,9 +47,22 @@ pub fn run_init(opts: InitOpts) -> anyhow::Result<i32> {
     // key check: if the remote already has a manifest, decrypting it proves
     // the passphrase (wrong passphrase = abort, nothing written)
     let keys = load_keys(&cfg, &repo)?;
-    let manifest_exists = read_manifest(&repo, &keys)?.is_some();
-    if manifest_exists {
+    let manifest = read_manifest(&repo, &keys)?;
+    let manifest_exists = manifest.is_some();
+    if let Some(m) = &manifest {
         println!("existing remote manifest decrypted — passphrase verified");
+        // Warning only, never an error: re-init of the SAME machine is a
+        // documented recovery flow and legitimately reuses its name.
+        let mut known = m.devices.clone();
+        known.insert(m.last_push_device.clone());
+        if known.contains(&opts.device) {
+            println!(
+                "⚠ device name {:?} is already used in this sync group — a second machine \
+                 under the same name silently disables the pull-before-push guard; \
+                 pick a unique name unless this is a re-init of that same machine",
+                opts.device
+            );
+        }
     }
 
     config::save_config(&cfg)?;

@@ -183,6 +183,16 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         println!("backfilled timestamps for {mtime_backfills} entries");
     }
     if summary.synced > 0 || !deletions.is_empty() || mtime_backfills > 0 {
+        // device registry: carry forward, backfill pre-0.1.15 manifests from
+        // last_push_device, and add ourselves
+        let mut devices = manifest
+            .as_ref()
+            .map(|m| m.devices.clone())
+            .unwrap_or_default();
+        if let Some(m) = manifest.as_ref() {
+            devices.insert(m.last_push_device.clone());
+        }
+        devices.insert(cfg.device.clone());
         write_manifest(
             &repo,
             &keys,
@@ -190,6 +200,7 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
                 version: 1,
                 last_push_device: cfg.device.clone(),
                 last_push_ts: unix_now(),
+                devices,
                 entries,
             },
         )?;

@@ -7,6 +7,12 @@ pub struct Manifest {
     pub version: u32,
     pub last_push_device: String,
     pub last_push_ts: u64,
+    /// Every device name that has ever pushed — lets init warn when a new
+    /// machine picks a name that is already taken (duplicates silently
+    /// disable Guard A). Best-effort: absent in pre-0.1.15 manifests, and a
+    /// mixed-version fleet may drop it (old versions rewrite without it).
+    #[serde(default)]
+    pub devices: std::collections::BTreeSet<String>,
     pub entries: BTreeMap<String, Entry>, // key = portable path
 }
 
@@ -71,6 +77,7 @@ mod tests {
             version: 1,
             last_push_device: "mac".into(),
             last_push_ts: 1234,
+            devices: Default::default(),
             entries,
         };
         let json = serde_json::to_vec(&m).unwrap();
@@ -81,6 +88,24 @@ mod tests {
         let e = &back.entries["projects/${HOME}-ws-app/s.jsonl"];
         assert_eq!(e.object, "abcd");
         assert!(e.mode == EntryMode::Transformed);
+    }
+
+    #[test]
+    fn devices_registry_defaults_empty_and_roundtrips() {
+        // pre-0.1.15 manifests carry no devices field
+        let legacy = r#"{"version":1,"last_push_device":"mac","last_push_ts":1,"entries":{}}"#;
+        let m: Manifest = serde_json::from_str(legacy).unwrap();
+        assert!(m.devices.is_empty());
+
+        let m2 = Manifest {
+            version: 1,
+            last_push_device: "mac".into(),
+            last_push_ts: 1,
+            devices: ["mac", "win"].iter().map(|s| s.to_string()).collect(),
+            entries: Default::default(),
+        };
+        let back: Manifest = serde_json::from_slice(&serde_json::to_vec(&m2).unwrap()).unwrap();
+        assert!(back.devices.contains("mac") && back.devices.contains("win"));
     }
 
     #[test]

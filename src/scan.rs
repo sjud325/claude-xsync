@@ -37,6 +37,13 @@ pub const EXCLUDED: &[&str] = &[
     ".credentials.json",
     "plugins",
     ".claude.json",
+    // machine-local state newer Claude Code versions create (server-fetched
+    // caches and daemon/telemetry state — each machine refetches its own)
+    "daemon",
+    "telemetry",
+    "policy-limits.json",
+    "remote-settings.json",
+    "vscode-claude-status-cache.json",
 ];
 
 pub struct ScanResult {
@@ -141,6 +148,33 @@ mod tests {
         let rels: Vec<&str> = r.files.iter().map(|(rel, _)| rel.as_str()).collect();
         assert_eq!(rels, vec!["projects/a/s.jsonl", "settings.json"]);
         assert_eq!(r.unknown, vec!["weird-new-dir".to_string()]);
+    }
+
+    #[test]
+    fn known_machine_local_entries_are_silently_excluded() {
+        let td = tempfile::tempdir().unwrap();
+        fs::write(td.path().join("settings.json"), b"{}").unwrap();
+        // machine-local state newer Claude Code versions create — never
+        // synced, and known well enough that warning about it is noise
+        for f in [
+            "policy-limits.json",
+            "remote-settings.json",
+            "vscode-claude-status-cache.json",
+        ] {
+            fs::write(td.path().join(f), b"{}").unwrap();
+        }
+        for d in ["daemon", "telemetry"] {
+            fs::create_dir_all(td.path().join(d)).unwrap();
+            fs::write(td.path().join(d).join("x"), b"x").unwrap();
+        }
+        // a genuinely unknown entry must still be reported
+        fs::create_dir_all(td.path().join("brand-new-thing")).unwrap();
+        fs::write(td.path().join("brand-new-thing/f"), b"f").unwrap();
+
+        let r = scan(td.path(), &Config::default()).unwrap();
+        let rels: Vec<&str> = r.files.iter().map(|(rel, _)| rel.as_str()).collect();
+        assert_eq!(rels, vec!["settings.json"]);
+        assert_eq!(r.unknown, vec!["brand-new-thing".to_string()]);
     }
 
     #[test]

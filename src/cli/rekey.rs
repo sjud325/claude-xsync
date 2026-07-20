@@ -86,6 +86,9 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
             version: 1,
             last_push_device: cfg.device.clone(),
             last_push_ts: unix_now(),
+            // registry resets to us alone: the old manifest needs the old key,
+            // and every peer re-pushes after a rekey anyway
+            devices: std::iter::once(cfg.device.clone()).collect(),
             entries,
         },
     )?;

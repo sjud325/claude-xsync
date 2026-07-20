@@ -1212,3 +1212,69 @@ fn guard_a_blocks_out_of_order_push() {
     assert_eq!(code, 2, "expected guard A abort: {out}");
     assert!(out.contains("pull"), "expected pull hint: {out}");
 }
+
+#[test]
+fn pull_dry_run_summary_counts_planned_changes() {
+    let env = TestEnv::new();
+    let (code, out) = env.init(&env.dev_a);
+    assert_eq!(code, 0, "init a failed: {out}");
+    let (code, out) = run(&env.dev_a, &["push"]);
+    assert_eq!(code, 0, "push a failed: {out}");
+    let (code, out) = env.init(&env.dev_b);
+    assert_eq!(code, 0, "init b failed: {out}");
+
+    // dev_a shipped s.jsonl + history.jsonl + settings.json + the CLAUDE.md
+    // note; dev_b's own settings.json differs (conflict). The summary must
+    // count what WOULD be applied, matching the "would apply" lines above it.
+    let (code, out) = run(&env.dev_b, &["pull", "--dry-run"]);
+    assert_eq!(code, 0, "dry-run pull failed: {out}");
+    assert!(
+        out.contains("would apply"),
+        "no planned files listed: {out}"
+    );
+    assert!(
+        out.contains("✓ 4 synced"),
+        "dry-run summary must count planned writes: {out}"
+    );
+    assert!(out.contains("⚡ 1 conflicts"), "conflict count lost: {out}");
+
+    // dry-run must not have changed anything: the real pull sees the same plan
+    let (code, out) = run(&env.dev_b, &["pull"]);
+    assert_eq!(code, 0, "real pull failed: {out}");
+    assert!(
+        out.contains("✓ 4 synced"),
+        "real pull disagrees with dry-run count: {out}"
+    );
+}
+
+#[test]
+fn init_warns_on_duplicate_device_name() {
+    let env = TestEnv::new();
+    let (code, out) = env.init(&env.dev_a); // device "mac"
+    assert_eq!(code, 0, "init a failed: {out}");
+    let (code, out) = run(&env.dev_a, &["push"]);
+    assert_eq!(code, 0, "push a failed: {out}");
+
+    // a different machine claiming the same name silently defeats Guard A —
+    // warn, but never block: re-init on the SAME machine is a recovery flow
+    let (code, out) = run(
+        &env.dev_b,
+        &["init", "--remote", &env.bare_url(), "--device", "mac"],
+    );
+    assert_eq!(code, 0, "duplicate name must warn, not fail: {out}");
+    assert!(
+        out.contains("already used"),
+        "missing duplicate-name warning: {out}"
+    );
+
+    // a unique name stays quiet
+    let (code, out) = run(
+        &env.dev_b,
+        &["init", "--remote", &env.bare_url(), "--device", "win2"],
+    );
+    assert_eq!(code, 0, "init b failed: {out}");
+    assert!(
+        !out.contains("already used"),
+        "false duplicate warning: {out}"
+    );
+}

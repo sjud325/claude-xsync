@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.14-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.15-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
@@ -95,6 +95,10 @@ claude-xsync app-index   # optional: show the synced sessions in the Claude desk
 To make the `app-index` step automatic, set `app_index_after_pull = true` in
 `~/.claude-xsync/config.toml` — every pull then refreshes the desktop app's
 session list by itself (details under `app-index` below).
+
+Give every machine a unique `--device` name: two machines under the same
+name silently disable the pull-before-push guard. `init` warns if the name
+is already taken on this remote (re-`init` of the same machine is fine).
 
 `init` on the first device also adds a **multi-device note** to your synced
 `~/.claude/CLAUDE.md` (marker-delimited managed block) so that sessions
@@ -199,6 +203,16 @@ unknown top-level entries are reported, never silently synced.
   freshness protection: whoever can force-push the remote can replay an older
   (internally consistent) snapshot; devices would realign to it, keeping
   local backups as the only trace.
+- **Deletions propagate — including automatic cleanup**: the fleet behaves
+  like one machine for deletions too. Files removed on one device (by hand,
+  or by Claude Code's `cleanupPeriodDays` auto-cleanup) are deleted
+  everywhere on the next push/pull cycle — so the machine with the shortest
+  retention setting effectively sets the whole fleet's. Pull also restores
+  original mtimes, which makes a freshly pulled old session immediately
+  eligible for local cleanup. Every pull-side deletion is first copied to
+  `~/.claude.backup.<ts>/` (machine-local, never synced) — that is the
+  safety net. Raise `cleanupPeriodDays` in the synced `settings.json` for
+  longer retention everywhere.
 - **Backups accumulate**: every pull that replaces files writes a full copy
   under `~/.claude.backup.<ts>/` and nothing prunes them — clean up
   periodically if disk space matters.

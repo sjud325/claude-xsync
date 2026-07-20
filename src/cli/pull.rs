@@ -232,21 +232,29 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     }
 
     if opts.dry_run {
+        // count exactly what apply would count, so the summary line agrees
+        // with the "would …" lines above it
         for p in &planned {
             match p {
                 Planned::Write {
                     rel,
                     conflict_local,
                     ..
-                } => println!(
-                    "would apply {rel}{}",
-                    if conflict_local.is_some() {
-                        " (conflict — local copy kept)"
-                    } else {
-                        ""
-                    }
-                ),
-                Planned::McpMerge { .. } => println!("would merge mcpServers into ~/.claude.json"),
+                } => {
+                    summary.synced += 1;
+                    println!(
+                        "would apply {rel}{}",
+                        if conflict_local.is_some() {
+                            " (conflict — local copy kept)"
+                        } else {
+                            ""
+                        }
+                    )
+                }
+                Planned::McpMerge { .. } => {
+                    summary.synced += 1;
+                    println!("would merge mcpServers into ~/.claude.json")
+                }
                 Planned::Delete { rel, portable } => {
                     println!(
                         "would remove {} (deleted on remote)",
