@@ -10,6 +10,7 @@ pub fn run_status(offline: bool) -> anyhow::Result<i32> {
     let git = Git::clone_or_open(&cfg.remote, &repo)?;
     if !offline {
         git.fetch()?;
+        let _ = git.drop_unpushed_ahead()?;
         if git.diverged()? {
             println!("note: remote history was rewritten (gc/rekey) — realigning local mirror");
             git.reset_hard_origin()?;

@@ -1808,3 +1808,200 @@ fn remote_deletion_propagates_with_backup() {
         });
     assert!(backed_up, "deleted file must be in a backup dir: {o}");
 }
+
+fn install_failing_hook(env: &TestEnv) {
+    let h = env.bare.path().join("hooks/pre-receive");
+    fs::write(&h, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&h, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn failed_push_never_poisons_later_syncs() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // the remote rejects the next push AFTER the mirror commit is made
+    install_failing_hook(&env);
+    fs::write(
+        env.dev_a.claude().join("settings.json"),
+        b"{\"model\":\"v2\"}",
+    )
+    .unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_ne!(c, 0, "push must fail against the rejecting remote: {o}");
+    fs::remove_file(env.bare.path().join("hooks/pre-receive")).unwrap();
+
+    // the natural reaction the tool trains: pull, then push again
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("✓ 1 synced"),
+        "v2 must re-seal after the failed push (stranded mirror commit must not anchor): {o}"
+    );
+
+    // no false "history rewritten" warnings afterwards
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("rewritten"),
+        "stranded anchor causes false rewrite warnings: {o}"
+    );
+
+    // and the edit actually reaches the fleet
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"v2\"}",
+        "v2 never propagated: {o}"
+    );
+}
+
+#[test]
+fn rekey_refuses_while_remote_entries_were_never_delivered() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    fs::create_dir_all(env.dev_a.claude().join("plans")).unwrap();
+    fs::write(env.dev_a.claude().join("plans/n.jsonl"), b"{\"v\":1}\n").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // A ships v2, then the object gets corrupted on the remote
+    fs::write(env.dev_a.claude().join("plans/n.jsonl"), b"{\"v\":2}\n").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    corrupt_remote_objects(&env);
+
+    // B's pull cannot stage v2 (skip, exit 1) but still anchors the commit
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 1, "expected skip exit: {o}");
+    assert!(o.contains("skipping"), "{o}");
+
+    // rekey would rebuild the manifest WITHOUT v2 and purge the history
+    // that still holds it — refuse until the pull is clean
+    let (c, o) = run_env(
+        &env.dev_b,
+        &["rekey"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 2, "rekey must refuse while entries are undelivered: {o}");
+    assert!(
+        o.contains("never delivered") || o.contains("undelivered"),
+        "missing explanation: {o}"
+    );
+
+    // --force remains the escape hatch
+    let (c, o) = run_env(
+        &env.dev_b,
+        &["rekey", "--force"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 0, "forced rekey must proceed: {o}");
+}
+
+#[test]
+fn mcp_both_modified_keeps_local_subtree_copy() {
+    let env = TestEnv::new();
+    fs::write(
+        env.dev_a.home.path().join(".claude.json"),
+        b"{\"mcpServers\":{\"a-server\":{\"command\":\"a\"}},\"other\":1}",
+    )
+    .unwrap();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    fs::write(
+        env.dev_b.home.path().join(".claude.json"),
+        b"{\"mcpServers\":{\"my-local-db\":{\"command\":\"b\"}}}",
+    )
+    .unwrap();
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // remote subtree applies (same rule as file conflicts: remote wins live)…
+    let live = fs::read_to_string(env.dev_b.home.path().join(".claude.json")).unwrap();
+    assert!(
+        live.contains("a-server"),
+        "remote subtree not applied: {live}"
+    );
+    // …but the local servers must survive as a conflict copy, loudly
+    assert!(
+        o.contains("⚡ conflict on mcpServers"),
+        "silent mcp replacement: {o}"
+    );
+    // settings.json (baseline fixture) + mcpServers = 2 conflicts total
+    assert!(o.contains("⚡ 2 conflicts"), "conflict not counted: {o}");
+    let copy = fs::read_dir(env.dev_b.claude())
+        .unwrap()
+        .flatten()
+        .find(|e| {
+            let n = e.file_name().to_string_lossy().to_string();
+            n.starts_with("mcp-servers.xsync-conflict.")
+        })
+        .map(|e| fs::read_to_string(e.path()).unwrap());
+    match copy {
+        Some(body) => assert!(
+            body.contains("my-local-db"),
+            "conflict copy lacks the local servers: {body}"
+        ),
+        None => panic!("no mcp conflict copy written: {o}"),
+    }
+}
+
+/// Corrupt every sealed object on the bare remote (clone → append junk →
+/// commit → push) so subsequent staging of changed entries fails.
+fn corrupt_remote_objects(env: &TestEnv) {
+    let tmp = TempDir::new().unwrap();
+    let clone = tmp.path().join("clone");
+    let clone_s = clone.to_string_lossy().to_string();
+    let out = Command::new("git")
+        .args(["clone", &env.bare_url(), clone_s.as_str()])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git clone: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for e in fs::read_dir(clone.join("objects")).unwrap().flatten() {
+        let mut bytes = fs::read(e.path()).unwrap();
+        bytes.extend_from_slice(b"CORRUPT");
+        fs::write(e.path(), bytes).unwrap();
+    }
+    for args in [
+        vec!["-C", clone_s.as_str(), "add", "-A"],
+        vec![
+            "-C",
+            clone_s.as_str(),
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-m",
+            "tamper",
+        ],
+        vec!["-C", clone_s.as_str(), "push", "origin", "main"],
+    ] {
+        let out = Command::new("git").args(&args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}

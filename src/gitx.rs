@@ -73,6 +73,26 @@ impl Git {
         Ok(!self.is_ancestor(&head, &remote)? && !self.is_ancestor(&remote, &head)?)
     }
 
+    /// A commit origin never accepted (failed push) must not shape a later
+    /// sync: the mirror is derived data, and classifying against a manifest
+    /// the remote doesn't have silently poisons anchors (nothing propagates,
+    /// status lies, false rewrite warnings). Reset when strictly ahead of
+    /// origin/main; the plaintext still lives in ~/.claude and re-seals on
+    /// the next push. Returns true when it reset.
+    pub fn drop_unpushed_ahead(&self) -> anyhow::Result<bool> {
+        let Ok(head) = self.head() else {
+            return Ok(false);
+        };
+        let Some(remote) = self.remote_head()? else {
+            return Ok(false);
+        };
+        if head != remote && self.is_ancestor(&remote, &head)? {
+            self.run(&["reset", "--hard", "origin/main"])?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     pub fn reset_hard_origin(&self) -> anyhow::Result<()> {
         self.fetch()?;
         self.run(&["reset", "--hard", "origin/main"]).map(|_| ())

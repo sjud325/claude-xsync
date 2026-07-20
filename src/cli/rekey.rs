@@ -1,4 +1,7 @@
-use crate::cli::{collect_locals, guard_running, repo_dir, unix_now, write_manifest};
+use crate::cli::{
+    collect_locals, guard_running, load_keys, read_manifest, repo_dir, unix_now, write_manifest,
+    MCP_PORTABLE,
+};
 use crate::config;
 use crate::crypto::{self, object_name};
 use crate::gitx::Git;
@@ -9,7 +12,7 @@ use std::collections::BTreeMap;
 
 /// Re-encrypt everything from local plaintext under a NEW passphrase + salt,
 /// then squash history so nothing decryptable with the old key survives.
-pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
+pub fn run_rekey(passphrase_env: String, force: bool) -> anyhow::Result<i32> {
     let cfg = config::load_config()?;
     let claude_dir = config::claude_dir();
     guard_running(&claude_dir, false)?;
@@ -39,6 +42,41 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
 
     crate::cli::ensure_repo_attributes(&repo)?;
 
+    let home = config::home_dir();
+    let mapper = PathMapper::new(&home.to_string_lossy(), &cfg.path_map)?;
+    let (locals, _) = collect_locals(&cfg, &claude_dir, &home, &mapper)?;
+
+    // Guard (review v0.1.20): the commit anchor alone does not prove content
+    // arrived — a pull that SKIPPED entries (corrupt object, unmapped token)
+    // still anchors the commit. Rekey rebuilds the manifest from locals and
+    // purges the history that still holds the skipped content, so refuse
+    // while any in-sync-set entry is neither anchored nor reproducible here.
+    if let Some(old) = read_manifest(&repo, &load_keys(&cfg, &repo)?)? {
+        let undelivered: Vec<&String> = old
+            .entries
+            .iter()
+            .filter(|(p, _)| p.as_str() == MCP_PORTABLE || crate::scan::is_synced_rel(p, &cfg))
+            .filter(|(p, e)| {
+                anchored_state.files.get(*p) != Some(&e.plaintext_hash)
+                    && locals.get(*p).map(|l| &l.portable_hash) != Some(&e.plaintext_hash)
+            })
+            .map(|(p, _)| p)
+            .collect();
+        if !undelivered.is_empty() && !force {
+            anyhow::bail!(
+                "{} remote entries were never delivered to this device (a pull skipped them): {}{} — rekey would purge them unrecoverably. Pull until clean (0 skipped) first, or re-run with --force to discard them",
+                undelivered.len(),
+                undelivered
+                    .iter()
+                    .take(3)
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if undelivered.len() > 3 { ", …" } else { "" }
+            );
+        }
+    }
+
     // new salt → new keys
     let mut salt = [0u8; 32];
     getrandom::getrandom(&mut salt)
@@ -51,9 +89,6 @@ pub fn run_rekey(passphrase_env: String) -> anyhow::Result<i32> {
     if objects_dir.is_dir() {
         std::fs::remove_dir_all(&objects_dir)?;
     }
-    let home = config::home_dir();
-    let mapper = PathMapper::new(&home.to_string_lossy(), &cfg.path_map)?;
-    let (locals, _) = collect_locals(&cfg, &claude_dir, &home, &mapper)?;
 
     let mut entries = BTreeMap::new();
     let mut new_state = State::default();

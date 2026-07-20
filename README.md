@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.20-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.21-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
@@ -130,7 +130,10 @@ Other commands:
   (recommended monthly or at ~1 GB; encrypted blobs don't delta, so an active
   large session can add ~30 MB of history per push). The other device
   auto-recovers on its next pull.
-- `claude-xsync rekey` — new passphrase + salt, full re-encrypt, mandatory squash
+- `claude-xsync rekey` — new passphrase + salt, full re-encrypt, mandatory
+  squash. Refuses while any remote entry was never delivered to this device
+  (a pull that skipped files still counts as incomplete) — pull until clean
+  first, or `--force` to discard those entries.
 - `claude-xsync claude-md` — insert the multi-device resume note into
   `~/.claude/CLAUDE.md`, or refresh a stale block in place between its
   markers (for setups initialized before this existed, or after upgrades

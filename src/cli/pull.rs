@@ -33,6 +33,10 @@ enum Planned {
     McpMerge {
         subtree: String,
         hash: String,
+        /// both-modified: the local subtree, preserved as a conflict copy —
+        /// mcp is merged into ~/.claude.json, so the regular file-conflict
+        /// path never sees it (review v0.1.20)
+        conflict_local: Option<String>,
     },
     Delete {
         rel: Option<String>,
@@ -45,16 +49,11 @@ enum Planned {
     },
     /// metadata-only repair: in-sync file whose mtime drifted (e.g. written
     /// by a pre-0.1.5 pull that stamped everything with pull time)
-    TouchMtime {
-        rel: String,
-        mtime: u64,
-    },
+    TouchMtime { rel: String, mtime: u64 },
     /// This device stopped syncing the path (config change / version
     /// upgrade) while a remote entry still exists: drop only OUR anchor, so
     /// push cannot read "not opted in here" as "delete the peers' data".
-    ForgetAnchor {
-        portable: String,
-    },
+    ForgetAnchor { portable: String },
 }
 
 pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
@@ -65,6 +64,11 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     let repo = repo_dir();
     let git = Git::clone_or_open(&cfg.remote, &repo)?;
     git.fetch()?;
+    if git.drop_unpushed_ahead()? {
+        println!(
+            "dropped a mirror commit the remote never accepted (a previous push failed) — content re-seals on the next push"
+        );
+    }
     let mut re_anchor = false;
     if git.diverged()? {
         println!("remote history was rewritten (gc --squash / rekey) — resetting local mirror");
@@ -222,10 +226,21 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 };
                 if portable == MCP_PORTABLE {
                     match String::from_utf8(bytes) {
-                        Ok(subtree) => planned.push(Planned::McpMerge {
-                            subtree,
-                            hash: e.plaintext_hash.clone(),
-                        }),
+                        Ok(subtree) => {
+                            // both sides changed the subtree: the merge
+                            // replaces it wholesale, so keep the local
+                            // servers as a loud conflict copy
+                            let conflict_local = (local.is_some() && local_changed)
+                                .then(|| String::from_utf8_lossy(&local.unwrap().raw).into_owned());
+                            if conflict_local.is_some() {
+                                summary.conflicts += 1;
+                            }
+                            planned.push(Planned::McpMerge {
+                                subtree,
+                                hash: e.plaintext_hash.clone(),
+                                conflict_local,
+                            })
+                        }
                         Err(_) => {
                             println!("✗ skipping {portable}: mcp subtree is not utf-8");
                             summary.skipped += 1;
@@ -297,9 +312,16 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                         }
                     )
                 }
-                Planned::McpMerge { .. } => {
+                Planned::McpMerge { conflict_local, .. } => {
                     summary.synced += 1;
-                    println!("would merge mcpServers into ~/.claude.json")
+                    println!(
+                        "would merge mcpServers into ~/.claude.json{}",
+                        if conflict_local.is_some() {
+                            " (conflict — local servers kept in a copy)"
+                        } else {
+                            ""
+                        }
+                    )
                 }
                 Planned::Delete { rel, portable } => match rel {
                     Some(rel) => println!("would remove {rel} (deleted on remote)"),
@@ -372,7 +394,19 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 state::upsert_and_save(&mut st, &portable, &hash)?;
                 summary.synced += 1;
             }
-            Planned::McpMerge { subtree, hash } => {
+            Planned::McpMerge {
+                subtree,
+                hash,
+                conflict_local,
+            } => {
+                if let Some(local_subtree) = conflict_local {
+                    let cpath = claude_dir.join(format!("mcp-servers.xsync-conflict.{stamp}.json"));
+                    crate::fsx::atomic_write(&cpath, local_subtree.as_bytes())?;
+                    println!(
+                        "⚡ conflict on mcpServers: your servers kept at {}",
+                        cpath.display()
+                    );
+                }
                 let current =
                     std::fs::read_to_string(&claude_json_path).unwrap_or_else(|_| "{}".into());
                 let merged = merge_mcp(&current, &subtree)?;

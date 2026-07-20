@@ -22,6 +22,11 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     let repo = repo_dir();
     let git = Git::clone_or_open(&cfg.remote, &repo)?;
     git.fetch()?;
+    if git.drop_unpushed_ahead()? {
+        println!(
+            "dropped a mirror commit the remote never accepted (a previous push failed) — re-sealing"
+        );
+    }
     if git.diverged()? {
         // repo/ is derived data — realign to the remote
         git.reset_hard_origin()?;

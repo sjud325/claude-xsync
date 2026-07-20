@@ -46,6 +46,10 @@ enum Cmd {
         /// Env var NAME that holds the NEW passphrase
         #[arg(long, default_value = "XSYNC_NEW_PASSPHRASE")]
         passphrase_env: String,
+        /// Proceed even when remote entries were never delivered here
+        /// (they are purged unrecoverably)
+        #[arg(long)]
+        force: bool,
     },
     /// Insert the multi-device resume note into ~/.claude/CLAUDE.md
     ClaudeMd,
@@ -67,7 +71,10 @@ fn main() {
         Cmd::Pull { dry_run, force } => cli::pull::run_pull(cli::pull::PullOpts { dry_run, force }),
         Cmd::Status { offline } => cli::status::run_status(offline),
         Cmd::Gc { squash } => cli::gc::run_gc(squash),
-        Cmd::Rekey { passphrase_env } => cli::rekey::run_rekey(passphrase_env),
+        Cmd::Rekey {
+            passphrase_env,
+            force,
+        } => cli::rekey::run_rekey(passphrase_env, force),
         Cmd::ClaudeMd => cli::claude_md::run_claude_md(),
         Cmd::AppIndex { dry_run, all } => cli::app_index::run_app_index(dry_run, all),
     };
