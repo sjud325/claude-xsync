@@ -361,6 +361,20 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
         println!("repaired timestamps on {touched} in-sync files");
     }
 
+    // machine-local housekeeping — never touches synced data, never fails
+    // the pull
+    if cfg.backup_keep > 0 {
+        match crate::fsx::prune_backups(&claude_dir, cfg.backup_keep as usize) {
+            Ok(pruned) if !pruned.is_empty() => println!(
+                "pruned {} old pull backups (kept the {} newest)",
+                pruned.len(),
+                cfg.backup_keep
+            ),
+            Ok(_) => {}
+            Err(e) => eprintln!("⚠ backup pruning skipped: {e:#}"),
+        }
+    }
+
     st.last_synced_commit = Some(git.head()?);
     state::save_state(&st)?;
     summary.print();

@@ -1278,3 +1278,82 @@ fn init_warns_on_duplicate_device_name() {
         "false duplicate warning: {out}"
     );
 }
+
+#[test]
+fn pull_prunes_old_backups_when_configured() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+
+    // two stale backup dirs from long-gone pulls
+    for stamp in ["1000000001", "1000000002"] {
+        let d = env
+            .dev_b
+            .home
+            .path()
+            .join(format!(".claude.backup.{stamp}"));
+        fs::create_dir_all(&d).unwrap();
+        fs::write(d.join("old.json"), b"{}").unwrap();
+    }
+    let count_backups = || {
+        fs::read_dir(env.dev_b.home.path())
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".claude.backup.")
+            })
+            .count()
+    };
+
+    // default (backup_keep = 0): pull creates a real backup (settings.json
+    // conflict) and prunes nothing
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(!o.contains("pruned"), "must not prune by default: {o}");
+    assert_eq!(
+        count_backups(),
+        3,
+        "fakes + the real backup must all remain"
+    );
+
+    // opt in: keep only the 2 newest
+    let cfg_path = env.dev_b.xsync().join("config.toml");
+    let cfg = fs::read_to_string(&cfg_path).unwrap();
+    assert!(
+        cfg.contains("backup_keep = 0"),
+        "init must write the knob explicitly: {cfg}"
+    );
+    fs::write(&cfg_path, cfg.replace("backup_keep = 0", "backup_keep = 2")).unwrap();
+
+    // dry-run must never delete anything
+    let (c, o) = run(&env.dev_b, &["pull", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(!o.contains("pruned"), "dry-run must not prune: {o}");
+    assert_eq!(count_backups(), 3);
+
+    // a real pull (even a no-op one) prunes down to the limit
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("pruned 1"), "missing prune report: {o}");
+    assert_eq!(count_backups(), 2);
+    assert!(
+        !env.dev_b
+            .home
+            .path()
+            .join(".claude.backup.1000000001")
+            .exists(),
+        "oldest fake must be gone"
+    );
+    assert!(
+        env.dev_b
+            .home
+            .path()
+            .join(".claude.backup.1000000002")
+            .exists(),
+        "second-newest must survive with keep = 2"
+    );
+}

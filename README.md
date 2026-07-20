@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.15-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.16-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
@@ -213,9 +213,10 @@ unknown top-level entries are reported, never silently synced.
   `~/.claude.backup.<ts>/` (machine-local, never synced) — that is the
   safety net. Raise `cleanupPeriodDays` in the synced `settings.json` for
   longer retention everywhere.
-- **Backups accumulate**: every pull that replaces files writes a full copy
-  under `~/.claude.backup.<ts>/` and nothing prunes them — clean up
-  periodically if disk space matters.
+- **Backups accumulate by default**: every pull that replaces files writes a
+  full copy under `~/.claude.backup.<ts>/` (machine-local, never synced).
+  Set `backup_keep = 10` in `~/.claude-xsync/config.toml` to keep only the
+  newest 10 after each pull; `0` (the default) keeps everything.
 - **Korean filenames (NFC/NFD)**: macOS decomposes filenames (NFD) while
   Windows keeps NFC; if you hit duplicate-looking files, normalize project
   filenames to NFC.

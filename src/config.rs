@@ -30,6 +30,11 @@ pub struct Config {
     /// failure never fails the pull.
     #[serde(default)]
     pub app_index_after_pull: bool,
+    /// Keep only the newest N pull-backup dirs (`~/.claude.backup.<ts>`),
+    /// pruned after each successful pull. 0 (default) keeps everything.
+    /// Backups are machine-local; suggested value: 10.
+    #[serde(default)]
+    pub backup_keep: u32,
 }
 
 pub fn claude_dir() -> PathBuf {

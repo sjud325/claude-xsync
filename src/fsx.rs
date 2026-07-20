@@ -36,6 +36,41 @@ pub fn backup_files(claude_dir: &Path, rels: &[String], stamp: &str) -> anyhow::
     Ok(backup)
 }
 
+/// Delete all but the newest `keep` pull-backup dirs (`<claude>.backup.<ts>`,
+/// numeric-stamp sort). Only exact matches are touched. Returns pruned names.
+pub fn prune_backups(claude_dir: &Path, keep: usize) -> anyhow::Result<Vec<String>> {
+    let name = claude_dir
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".claude".into());
+    let prefix = format!("{name}.backup.");
+    let Some(parent) = claude_dir.parent() else {
+        return Ok(Vec::new());
+    };
+    let mut stamped: Vec<(u64, String, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(parent)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let Some(stamp) = dir_name.strip_prefix(&prefix) else {
+            continue;
+        };
+        let Ok(ts) = stamp.parse::<u64>() else {
+            continue;
+        };
+        stamped.push((ts, dir_name, entry.path()));
+    }
+    stamped.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    let mut pruned = Vec::new();
+    for (_, dir_name, path) in stamped.into_iter().skip(keep) {
+        std::fs::remove_dir_all(&path)?;
+        pruned.push(dir_name);
+    }
+    Ok(pruned)
+}
+
 /// Set a file's modification time (unix secs).
 pub fn set_mtime(path: &Path, unix_secs: u64) -> anyhow::Result<()> {
     let f = std::fs::OpenOptions::new()
@@ -92,6 +127,35 @@ mod tests {
             b"{}\n"
         );
         assert!(!backup.join("missing.json").exists());
+    }
+
+    #[test]
+    fn prune_backups_keeps_newest_n_by_numeric_stamp() {
+        let td = tempfile::tempdir().unwrap();
+        let claude = td.path().join(".claude");
+        fs::create_dir_all(&claude).unwrap();
+        // numeric sort, not lexicographic: 100 > 99
+        for stamp in ["99", "100", "300"] {
+            let d = td.path().join(format!(".claude.backup.{stamp}"));
+            fs::create_dir_all(&d).unwrap();
+            fs::write(d.join("f"), b"x").unwrap();
+        }
+        // non-matching neighbors must never be touched
+        fs::create_dir_all(td.path().join(".claude.backup.notanum")).unwrap();
+        fs::create_dir_all(td.path().join(".claude.backupX")).unwrap();
+        fs::write(td.path().join(".claude.backup.50"), b"a file, not a dir").unwrap();
+
+        let pruned = prune_backups(&claude, 2).unwrap();
+        assert_eq!(pruned, vec![".claude.backup.99".to_string()]);
+        assert!(!td.path().join(".claude.backup.99").exists());
+        assert!(td.path().join(".claude.backup.100").exists());
+        assert!(td.path().join(".claude.backup.300").exists());
+        assert!(td.path().join(".claude.backup.notanum").exists());
+        assert!(td.path().join(".claude.backupX").exists());
+        assert!(td.path().join(".claude.backup.50").is_file());
+
+        // under the limit → nothing to do
+        assert!(prune_backups(&claude, 2).unwrap().is_empty());
     }
 
     #[test]
