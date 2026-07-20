@@ -273,6 +273,18 @@ pub(crate) fn deletion_action(
     }
 }
 
+/// Drop exactly the chunk files a manifest entry owns — O(chunks), not a
+/// directory scan.
+fn remove_entry_objects(repo: &std::path::Path, entry: &Entry) -> anyhow::Result<()> {
+    for rel in chunk_paths(&entry.object, entry.chunks) {
+        let p = repo.join(&rel);
+        if p.exists() {
+            std::fs::remove_file(&p)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,16 +325,4 @@ mod tests {
             DeletionAction::SkipStale
         );
     }
-}
-
-/// Drop exactly the chunk files a manifest entry owns — O(chunks), not a
-/// directory scan.
-fn remove_entry_objects(repo: &std::path::Path, entry: &Entry) -> anyhow::Result<()> {
-    for rel in chunk_paths(&entry.object, entry.chunks) {
-        let p = repo.join(&rel);
-        if p.exists() {
-            std::fs::remove_file(&p)?;
-        }
-    }
-    Ok(())
 }
