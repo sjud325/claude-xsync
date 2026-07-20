@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.17-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.18-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
@@ -104,6 +104,11 @@ pushed at least once are known; re-`init` of the same machine is fine).
 When a release changes *what* is synced (its notes will say so), upgrade
 every machine promptly: a mixed-version fleet can ping-pong newly
 machine-local files back and forth until all machines run the same version.
+
+Sync membership is per device: opting a path out on one machine (dropping
+it from `extra_paths`, or listing it in `removed_paths`) makes only *that*
+machine stop syncing it — it forgets its own sync anchors for the path and
+never deletes the remote copy, so devices still opted in keep syncing.
 
 `init` on the first device also adds a **multi-device note** to your synced
 `~/.claude/CLAUDE.md` (marker-delimited managed block) so that sessions

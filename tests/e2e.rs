@@ -1372,6 +1372,14 @@ fn pull_never_overwrites_paths_outside_this_devices_sync_set() {
     .unwrap();
     fs::create_dir_all(env.dev_a.claude().join("daemon")).unwrap();
     fs::write(env.dev_a.claude().join("daemon/marker.txt"), b"from-a").unwrap();
+    // guard against a silently no-oped config splice: the opt-in must be
+    // visible in what push plans to send
+    let (c, o) = run(&env.dev_a, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("daemon/marker.txt"),
+        "config splice did not take effect — test would be vacuous: {o}"
+    );
     let (c, o) = run(&env.dev_a, &["push"]);
     assert_eq!(c, 0, "{o}");
 
@@ -1398,6 +1406,13 @@ fn pull_never_overwrites_paths_outside_this_devices_sync_set() {
     assert!(
         env.dev_b.claude().join("history.jsonl").exists(),
         "synced files must still arrive: {o}"
+    );
+    // status must agree with what pull actually does — no phantom to-pull
+    let (c, o) = run(&env.dev_b, &["status", "--offline"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("to pull: 0"),
+        "status counts entries pull will never apply: {o}"
     );
 }
 
@@ -1463,4 +1478,151 @@ fn remote_deletion_of_desynced_path_leaves_local_file_untouched() {
         !state.contains(".last_inuse_sweep"),
         "state entry must be dropped: {state}"
     );
+}
+
+/// Shared setup: dev_a syncs daemon/ via extra_paths; dev_b opts in, pulls
+/// (gaining an anchor), then opts back out — the anchor is now stranded.
+fn stranded_anchor_env() -> TestEnv {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    for dev in [&env.dev_a, &env.dev_b] {
+        let p = dev.xsync().join("config.toml");
+        let cfg = fs::read_to_string(&p).unwrap();
+        let patched = cfg.replace("extra_paths = []", "extra_paths = [\"daemon\"]");
+        assert_ne!(patched, cfg, "config splice no-oped: {cfg}");
+        fs::write(&p, patched).unwrap();
+    }
+    fs::create_dir_all(env.dev_a.claude().join("daemon")).unwrap();
+    fs::write(env.dev_a.claude().join("daemon/marker.txt"), b"from-a").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("daemon/marker.txt")).unwrap(),
+        b"from-a",
+        "opt-in pull must deliver the file: {o}"
+    );
+    // dev_b opts back out — daemon is machine-local for it from now on
+    let p = env.dev_b.xsync().join("config.toml");
+    let cfg = fs::read_to_string(&p).unwrap();
+    fs::write(
+        &p,
+        cfg.replace("extra_paths = [\"daemon\"]", "extra_paths = []"),
+    )
+    .unwrap();
+    env
+}
+
+#[test]
+fn optout_pull_forgets_anchor_and_later_push_spares_peer_data() {
+    let env = stranded_anchor_env();
+
+    // the opt-out pull drops dev_b's anchor and says so honestly
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("forgot sync state for daemon/marker.txt (not in this device's sync set)"),
+        "missing anchor-disposal line: {o}"
+    );
+    assert!(
+        env.dev_b.claude().join("daemon/marker.txt").exists(),
+        "opt-out must not delete the local copy"
+    );
+
+    // with the anchor gone, dev_b's push must not touch the remote entry
+    let (c, o) = run(&env.dev_b, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("would delete daemon/marker.txt"),
+        "push still plans to delete the peer's opted-in data: {o}"
+    );
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_a's data survives the full round trip
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(!o.contains("removed daemon/marker.txt"), "{o}");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("daemon/marker.txt")).unwrap(),
+        b"from-a",
+        "peer's opted-in file was deleted by dev_b's opt-out: {o}"
+    );
+}
+
+#[test]
+fn optout_push_before_any_pull_never_deletes_peer_data() {
+    let env = stranded_anchor_env();
+
+    // upgrade-order hazard: dev_b pushes FIRST, stranded anchor still present
+    let (c, o) = run(&env.dev_b, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("would delete daemon/marker.txt"),
+        "push turns a stranded anchor into deleting the peer's data: {o}"
+    );
+    assert!(
+        o.contains("would forget sync state for daemon/marker.txt"),
+        "missing honest dry-run line for anchor disposal: {o}"
+    );
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("forgot sync state for daemon/marker.txt"),
+        "missing anchor-disposal line: {o}"
+    );
+
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("daemon/marker.txt")).unwrap(),
+        b"from-a",
+        "peer's opted-in file was deleted by dev_b's push: {o}"
+    );
+}
+
+#[test]
+fn extra_paths_plugins_wholesale_roundtrip() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    for dev in [&env.dev_a, &env.dev_b] {
+        let p = dev.xsync().join("config.toml");
+        let cfg = fs::read_to_string(&p).unwrap();
+        let patched = cfg.replace("extra_paths = []", "extra_paths = [\"plugins\"]");
+        assert_ne!(patched, cfg, "config splice no-oped: {cfg}");
+        fs::write(&p, patched).unwrap();
+    }
+    let plugins = env.dev_a.claude().join("plugins");
+    fs::create_dir_all(plugins.join("repos/foo")).unwrap();
+    fs::write(plugins.join("config.json"), b"{\"root\":1}").unwrap();
+    fs::write(plugins.join("repos/foo/manifest.json"), b"{\"nested\":1}").unwrap();
+    // structurally machine-local: excluded even under a wholesale opt-in
+    fs::write(plugins.join(".last_inuse_sweep"), b"stamp-a").unwrap();
+
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    let b_plugins = env.dev_b.claude().join("plugins");
+    assert_eq!(
+        fs::read(b_plugins.join("config.json")).unwrap(),
+        b"{\"root\":1}"
+    );
+    assert_eq!(
+        fs::read(b_plugins.join("repos/foo/manifest.json")).unwrap(),
+        b"{\"nested\":1}",
+        "wholesale opt-in must deliver nested plugin files: {o}"
+    );
+    assert!(
+        !b_plugins.join(".last_inuse_sweep").exists(),
+        "sweep marker must never sync, even under wholesale opt-in: {o}"
+    );
+    // and status agrees nothing is left over
+    let (c, o) = run(&env.dev_b, &["status", "--offline"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(o.contains("to pull: 0"), "phantom to-pull remains: {o}");
 }

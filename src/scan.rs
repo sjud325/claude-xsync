@@ -67,8 +67,9 @@ pub fn scan(claude_dir: &Path, cfg: &Config) -> anyhow::Result<ScanResult> {
             continue;
         }
         let removed = cfg.removed_paths.contains(&name);
-        let allowed =
-            (ALLOWLIST.contains(&name.as_str()) || cfg.extra_paths.contains(&name)) && !removed;
+        // same predicate pull and status consult — collection and
+        // application can no longer disagree about membership
+        let allowed = is_synced_rel(&name, cfg);
         if allowed {
             if ft.is_dir() {
                 walk(&entry.path(), &name, &mut files)?;
@@ -107,21 +108,29 @@ pub fn is_never_synced_rel(rel: &str) -> bool {
 }
 
 /// Is this path in THIS device's sync set? The single source of truth shared
-/// by collection (push) and application (pull): a device must never receive
-/// remote content for a path it would not itself collect. Accepts rel or
-/// portable form (the top segment and plugins root are identical in both).
-/// The mcp synthetic portable is handled by its caller, not here.
+/// by collection (push/scan), application (pull), and accounting (status):
+/// a device must never receive remote content for a path it would not itself
+/// collect. Accepts rel or portable form (the top segment and plugins root
+/// are identical in both). Precedence: never-synced > removed_paths >
+/// extra_paths (explicit opt-in wins, including a wholesale `plugins`) >
+/// plugins root-manifest rule > ALLOWLIST. The mcp synthetic portable is
+/// handled by its callers, not here.
 pub fn is_synced_rel(rel: &str, cfg: &Config) -> bool {
     if is_never_synced_rel(rel) {
         return false;
+    }
+    let top = rel.split('/').next().unwrap_or(rel);
+    if cfg.removed_paths.iter().any(|r| r == top) {
+        return false;
+    }
+    if cfg.extra_paths.iter().any(|e| e == top) {
+        return true;
     }
     if let Some(rest) = rel.strip_prefix("plugins/") {
         // only root-level manifest files sync; dirs are machine-built
         return !rest.contains('/');
     }
-    let top = rel.split('/').next().unwrap_or(rel);
-    let removed = cfg.removed_paths.iter().any(|r| r == top);
-    (ALLOWLIST.contains(&top) || cfg.extra_paths.iter().any(|e| e == top)) && !removed
+    ALLOWLIST.contains(&top)
 }
 
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> anyhow::Result<()> {
@@ -129,10 +138,10 @@ fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> anyhow::R
         let entry = entry?;
         let name = entry.file_name().to_string_lossy().to_string();
         let ft = entry.file_type()?;
-        if ft.is_symlink() || name == ".DS_Store" || is_conflict_copy(&name) {
+        let rel = format!("{prefix}/{name}");
+        if ft.is_symlink() || name == ".DS_Store" || is_never_synced_rel(&rel) {
             continue;
         }
-        let rel = format!("{prefix}/{name}");
         if ft.is_dir() {
             walk(&entry.path(), &rel, out)?;
         } else {
@@ -195,6 +204,13 @@ mod tests {
         assert!(is_synced_rel("daemon/marker.txt", &cfg));
         cfg.removed_paths.push("todos".into());
         assert!(!is_synced_rel("todos/t.json", &cfg));
+
+        // wholesale plugins opt-in: nested files sync, structural
+        // machine-local markers still never do
+        let mut whole = Config::default();
+        whole.extra_paths.push("plugins".into());
+        assert!(is_synced_rel("plugins/repos/foo/manifest.json", &whole));
+        assert!(!is_synced_rel("plugins/.last_inuse_sweep", &whole));
     }
 
     #[test]

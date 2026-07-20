@@ -49,6 +49,12 @@ enum Planned {
         rel: String,
         mtime: u64,
     },
+    /// This device stopped syncing the path (config change / version
+    /// upgrade) while a remote entry still exists: drop only OUR anchor, so
+    /// push cannot read "not opted in here" as "delete the peers' data".
+    ForgetAnchor {
+        portable: String,
+    },
 }
 
 pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
@@ -140,8 +146,16 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 // A remote entry for a path outside THIS device's sync set
                 // (machine-local marker, un-opted extra_paths dir, …) is
                 // never applied — receiving it would overwrite live machine
-                // state (review v0.1.16 finding C).
+                // state (review v0.1.16 finding C). Anchor disposal splits
+                // by class: structurally never-synced paths keep the anchor
+                // so push cleans the stale remote entry fleet-wide; config-
+                // dependent misses drop it (review v0.1.17 finding 1).
                 if portable != MCP_PORTABLE && !crate::scan::is_synced_rel(&portable, &cfg) {
+                    if state_h.is_some() && !crate::scan::is_never_synced_rel(&portable) {
+                        planned.push(Planned::ForgetAnchor {
+                            portable: portable.clone(),
+                        });
+                    }
                     continue;
                 }
                 let local_h = local.map(|l| l.portable_hash.clone());
@@ -273,6 +287,9 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 },
                 Planned::StateOnly { portable, .. } => println!("already in sync: {portable}"),
                 Planned::TouchMtime { .. } => {}
+                Planned::ForgetAnchor { portable } => println!(
+                    "would forget sync state for {portable} (not in this device's sync set)"
+                ),
             }
         }
         let touches = planned
@@ -371,6 +388,11 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                     touched += 1;
                 }
             }
+            Planned::ForgetAnchor { portable } => {
+                st.files.remove(&portable);
+                state::save_state(&st)?;
+                println!("forgot sync state for {portable} (not in this device's sync set)");
+            }
         }
     }
     if touched > 0 {
@@ -382,7 +404,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     if cfg.backup_keep > 0 {
         match crate::fsx::prune_backups(&claude_dir, cfg.backup_keep as usize, now) {
             Ok(pruned) if !pruned.is_empty() => println!(
-                "pruned {} old pull backups (kept the {} newest)",
+                "pruned {} old pull backups (backup_keep = {})",
                 pruned.len(),
                 cfg.backup_keep
             ),

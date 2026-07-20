@@ -37,6 +37,11 @@ pub fn run_status(offline: bool) -> anyhow::Result<i32> {
     let to_pull: Vec<&String> = manifest
         .entries
         .iter()
+        // count only what pull would actually apply — entries outside this
+        // device's sync set are skipped there, so they are not "to pull"
+        .filter(|(p, _)| {
+            p.as_str() == crate::cli::MCP_PORTABLE || crate::scan::is_synced_rel(p, &cfg)
+        })
         .filter(|(p, e)| st.files.get(*p) != Some(&e.plaintext_hash))
         .map(|(p, _)| p)
         .collect();

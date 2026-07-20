@@ -1,6 +1,6 @@
 use crate::cli::{
     collect_locals, guard_running, load_keys, read_manifest, repo_dir, unix_now, write_manifest,
-    Summary,
+    Summary, MCP_PORTABLE,
 };
 use crate::config;
 use crate::crypto::object_name;
@@ -149,8 +149,21 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
     // Same staleness guard as above: if the remote changed the file after our
     // anchor, deleting it here would destroy the peer's newer data (review C1).
     let mut deletions: Vec<String> = Vec::new();
+    let mut anchor_forgets: Vec<String> = Vec::new();
     for (portable, anchored_hash) in &st.files {
         if locals.contains_key(portable) {
+            continue;
+        }
+        // "Vanished from locals" can also mean "no longer in this device's
+        // sync set" (opt-out, upgrade). Structurally never-synced paths fall
+        // through to deletion — every device agrees they don't belong on the
+        // remote. A config-dependent miss must only drop OUR anchor: the
+        // entry may be a peer's opted-in data (review v0.1.17 finding 1).
+        if portable.as_str() != MCP_PORTABLE
+            && !crate::scan::is_never_synced_rel(portable)
+            && !crate::scan::is_synced_rel(portable, &cfg)
+        {
+            anchor_forgets.push(portable.clone());
             continue;
         }
         match entries.get(portable) {
@@ -162,6 +175,17 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
             }
             _ => deletions.push(portable.clone()),
         }
+    }
+    for portable in &anchor_forgets {
+        if opts.dry_run {
+            println!("would forget sync state for {portable} (not in this device's sync set)");
+        } else {
+            st.files.remove(portable);
+            println!("forgot sync state for {portable} (not in this device's sync set)");
+        }
+    }
+    if !opts.dry_run && !anchor_forgets.is_empty() {
+        state::save_state(&st)?;
     }
     if !opts.dry_run {
         for portable in &deletions {
