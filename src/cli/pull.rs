@@ -110,7 +110,11 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                     .insert(portable.clone(), entry.plaintext_hash.clone());
             }
         }
-        state::save_state(&st)?;
+        // dry-run classifies with the corrected anchors but must not
+        // persist them — a "read-only" inspection may not rewrite state
+        if !opts.dry_run {
+            state::save_state(&st)?;
+        }
     }
 
     // ---- classify (spec §7 table) + stage ----
@@ -135,10 +139,14 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
         match (local, &state_h, entry) {
             // local-only new — preserve; joins the remote on the next push
             (Some(_), None, None) | (None, None, None) => {}
-            // remote deleted — move local to backup, forget state
+            // remote deleted — move local to backup, forget state. Belt and
+            // braces: never remove a file the sync set does not cover, even
+            // if some collection path put it into `locals`.
             (_, Some(_), None) => {
                 planned.push(Planned::Delete {
-                    rel: local.and_then(|l| l.rel.clone()),
+                    rel: local
+                        .and_then(|l| l.rel.clone())
+                        .filter(|r| crate::scan::is_synced_rel(r, &cfg)),
                     portable: portable.clone(),
                 });
             }

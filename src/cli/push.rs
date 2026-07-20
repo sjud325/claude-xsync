@@ -154,26 +154,20 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
         if locals.contains_key(portable) {
             continue;
         }
-        // "Vanished from locals" can also mean "no longer in this device's
-        // sync set" (opt-out, upgrade). Structurally never-synced paths fall
-        // through to deletion — every device agrees they don't belong on the
-        // remote. A config-dependent miss must only drop OUR anchor: the
-        // entry may be a peer's opted-in data (review v0.1.17 finding 1).
-        if portable.as_str() != MCP_PORTABLE
-            && !crate::scan::is_never_synced_rel(portable)
-            && !crate::scan::is_synced_rel(portable, &cfg)
-        {
-            anchor_forgets.push(portable.clone());
-            continue;
-        }
-        match entries.get(portable) {
-            Some(e) if e.plaintext_hash != *anchored_hash => {
+        match deletion_action(
+            portable,
+            anchored_hash,
+            entries.get(portable).map(|e| e.plaintext_hash.as_str()),
+            &cfg,
+        ) {
+            DeletionAction::Forget => anchor_forgets.push(portable.clone()),
+            DeletionAction::SkipStale => {
                 println!(
                     "✗ {portable}: deleted locally but changed on the remote — run `claude-xsync pull` first"
                 );
                 summary.skipped += 1;
             }
-            _ => deletions.push(portable.clone()),
+            DeletionAction::Delete => deletions.push(portable.clone()),
         }
     }
     for portable in &anchor_forgets {
@@ -244,6 +238,81 @@ pub fn run_push(opts: PushOpts) -> anyhow::Result<i32> {
 
     summary.print();
     Ok(summary.exit_code())
+}
+
+/// What push does about an anchored portable that vanished from `locals`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum DeletionAction {
+    /// Config-dependent non-membership: the entry may be a peer's opted-in
+    /// data — drop only OUR anchor, never the remote copy.
+    Forget,
+    /// Remote moved past our anchor: peer data is newer, warn + skip (C1).
+    SkipStale,
+    /// Delete the remote entry (and forget the anchor).
+    Delete,
+}
+
+pub(crate) fn deletion_action(
+    portable: &str,
+    anchored_hash: &str,
+    entry_hash: Option<&str>,
+    cfg: &crate::config::Config,
+) -> DeletionAction {
+    let never = crate::scan::is_never_synced_rel(portable);
+    if portable != MCP_PORTABLE && !never && !crate::scan::is_synced_rel(portable, cfg) {
+        return DeletionAction::Forget;
+    }
+    match entry_hash {
+        // Never-synced content is structurally junk on every device, so C1's
+        // "protect the peer's newer data" rationale does not apply — deleting
+        // even a moved entry IS the fleet-wide cleanup. Without this, a stale
+        // sweep-marker anchor deadlocks every upgraded device in a permanent
+        // "run pull first" loop that pull can never resolve (review v0.1.18).
+        Some(h) if h != anchored_hash && !never => DeletionAction::SkipStale,
+        _ => DeletionAction::Delete,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    #[test]
+    fn deletion_action_classes() {
+        let cfg = Config::default();
+        // synced path, anchor matches remote → normal deletion
+        assert_eq!(
+            deletion_action("settings.json", "h1", Some("h1"), &cfg),
+            DeletionAction::Delete
+        );
+        // synced path, remote moved past our anchor → C1 stale skip
+        assert_eq!(
+            deletion_action("settings.json", "h1", Some("h2"), &cfg),
+            DeletionAction::SkipStale
+        );
+        // entry already gone → state cleanup
+        assert_eq!(
+            deletion_action("settings.json", "h1", None, &cfg),
+            DeletionAction::Delete
+        );
+        // config-dependent miss → forget, never delete (peer's data)
+        assert_eq!(
+            deletion_action("daemon/marker.txt", "h1", Some("h2"), &cfg),
+            DeletionAction::Forget
+        );
+        // never-synced junk with a MOVED hash must still delete — a stale
+        // sweep anchor must not deadlock the upgrade path
+        assert_eq!(
+            deletion_action("plugins/.last_inuse_sweep", "h1", Some("h2"), &cfg),
+            DeletionAction::Delete
+        );
+        // the mcp synthetic behaves like a synced path
+        assert_eq!(
+            deletion_action("_xsync/mcp-servers.json", "h1", Some("h2"), &cfg),
+            DeletionAction::SkipStale
+        );
+    }
 }
 
 /// Drop exactly the chunk files a manifest entry owns — O(chunks), not a

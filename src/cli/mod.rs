@@ -233,6 +233,11 @@ pub fn collect_locals(
         }
     }
     for rel in crate::special::plugins::plugin_manifest_rels(&claude_dir.join("plugins")) {
+        // same membership predicate as everywhere else — a removed_paths
+        // opt-out must silence this synthetic collection too (review v0.1.18)
+        if !crate::scan::is_synced_rel(&rel, cfg) {
+            continue;
+        }
         let path = claude_dir.join(&rel);
         let raw = std::fs::read(&path)?;
         let mtime = file_mtime_secs(&path);

@@ -1626,3 +1626,92 @@ fn extra_paths_plugins_wholesale_roundtrip() {
     assert_eq!(c, 0, "{o}");
     assert!(o.contains("to pull: 0"), "phantom to-pull remains: {o}");
 }
+
+#[test]
+fn removed_paths_plugins_opt_out_is_respected() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    // dev_a opts plugin manifests out entirely
+    let p = env.dev_a.xsync().join("config.toml");
+    let cfg = fs::read_to_string(&p).unwrap();
+    let patched = cfg.replace("removed_paths = []", "removed_paths = [\"plugins\"]");
+    assert_ne!(patched, cfg, "config splice no-oped: {cfg}");
+    fs::write(&p, patched).unwrap();
+    fs::create_dir_all(env.dev_a.claude().join("plugins")).unwrap();
+    fs::write(env.dev_a.claude().join("plugins/config.json"), b"a-local").unwrap();
+
+    // collection must respect the opt-out (single-predicate contract)
+    let (c, o) = run(&env.dev_a, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("plugins/config.json"),
+        "removed_paths opt-out ignored by plugin-manifest collection: {o}"
+    );
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // a peer that DOES sync plugin manifests pushes its own copy
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    fs::create_dir_all(env.dev_b.claude().join("plugins")).unwrap();
+    fs::write(env.dev_b.claude().join("plugins/config.json"), b"from-b").unwrap();
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // the opted-out device neither receives nor loses its machine-local copy
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_a.claude().join("plugins/config.json")).unwrap(),
+        b"a-local",
+        "opt-out device's plugins/config.json was touched: {o}"
+    );
+    // and its next push leaves the peer's remote copy alone
+    let (c, o) = run(&env.dev_a, &["push", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("would delete plugins/config.json"),
+        "opt-out device plans to delete the peer's data: {o}"
+    );
+}
+
+#[test]
+fn dry_run_pull_after_squash_leaves_state_untouched() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // remote history rewritten while dev_b holds now-stale anchors
+    fs::write(
+        env.dev_a.claude().join("settings.json"),
+        b"{\"model\":\"v2\"}",
+    )
+    .unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_a, &["gc", "--squash"]);
+    assert_eq!(c, 0, "{o}");
+
+    let state_path = env.dev_b.xsync().join("state.json");
+    let before = fs::read(&state_path).unwrap();
+    let (c, o) = run(&env.dev_b, &["pull", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(&state_path).unwrap(),
+        before,
+        "dry-run pull mutated state.json after a squash: {o}"
+    );
+    // the real pull still recovers normally afterwards
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("settings.json")).unwrap(),
+        b"{\"model\":\"v2\"}",
+        "post-squash recovery broken: {o}"
+    );
+}
