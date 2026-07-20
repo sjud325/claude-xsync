@@ -62,7 +62,7 @@ pub fn prune_backups(claude_dir: &Path, keep: usize) -> anyhow::Result<Vec<Strin
         };
         stamped.push((ts, dir_name, entry.path()));
     }
-    stamped.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    stamped.sort_by_key(|s| std::cmp::Reverse(s.0)); // newest first
     let mut pruned = Vec::new();
     for (_, dir_name, path) in stamped.into_iter().skip(keep) {
         std::fs::remove_dir_all(&path)?;
