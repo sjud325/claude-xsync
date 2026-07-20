@@ -1715,3 +1715,96 @@ fn dry_run_pull_after_squash_leaves_state_untouched() {
         "post-squash recovery broken: {o}"
     );
 }
+
+#[test]
+fn real_pull_after_dry_run_still_detects_history_rewrite() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_b opts daemon/ in and uploads its own file
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let p = env.dev_b.xsync().join("config.toml");
+    let cfg = fs::read_to_string(&p).unwrap();
+    let patched = cfg.replace("extra_paths = []", "extra_paths = [\"daemon\"]");
+    assert_ne!(patched, cfg, "config splice no-oped: {cfg}");
+    fs::write(&p, patched).unwrap();
+    fs::create_dir_all(env.dev_b.claude().join("daemon")).unwrap();
+    fs::write(env.dev_b.claude().join("daemon/marker.txt"), b"b-data").unwrap();
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_b, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_a rewrites history: rekey rebuilds the manifest from A's locals,
+    // which do NOT include daemon/ — the entry vanishes from the remote
+    let (c, o) = run(&env.dev_a, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run_env(
+        &env.dev_a,
+        &["rekey"],
+        &[("XSYNC_NEW_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 0, "rekey failed: {o}");
+
+    // a cautious dev_b inspects first — the dry run consumes the mirror's
+    // divergence signal, but the REAL pull must still re-anchor: without
+    // that, stale anchors classify B's own daemon file as remote-deleted
+    let (c, o) = run_env(
+        &env.dev_b,
+        &["pull", "--dry-run"],
+        &[("XSYNC_PASSPHRASE", "new-pass")],
+    );
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("would remove daemon/marker.txt"),
+        "dry-run misclassifies B's own file as remote-deleted: {o}"
+    );
+    let (c, o) = run_env(&env.dev_b, &["pull"], &[("XSYNC_PASSPHRASE", "new-pass")]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("rewritten"),
+        "real pull after a dry run lost the rewrite detection: {o}"
+    );
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("daemon/marker.txt")).unwrap(),
+        b"b-data",
+        "history rewrite + preceding dry-run deleted B's local file: {o}"
+    );
+}
+
+#[test]
+fn remote_deletion_propagates_with_backup() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    fs::create_dir_all(env.dev_a.claude().join("agents")).unwrap();
+    fs::write(env.dev_a.claude().join("agents/foo.md"), b"# agent").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(env.dev_b.claude().join("agents/foo.md").exists());
+
+    fs::remove_file(env.dev_a.claude().join("agents/foo.md")).unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        o.contains("removed agents/foo.md (deleted on remote; backup kept)"),
+        "missing deletion report: {o}"
+    );
+    assert!(!env.dev_b.claude().join("agents/foo.md").exists());
+    let backed_up = fs::read_dir(env.dev_b.home.path())
+        .unwrap()
+        .flatten()
+        .any(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(".claude.backup.")
+                && e.path().join("agents/foo.md").is_file()
+        });
+    assert!(backed_up, "deleted file must be in a backup dir: {o}");
+}

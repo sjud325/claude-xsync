@@ -91,6 +91,23 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     let (locals, _unknown) = collect_locals(&cfg, &claude_dir, &home, &mapper)?;
     let mut st = state::load_state();
 
+    // The mirror's divergence signal is one-shot: a prior `pull --dry-run`
+    // or `status` may already have realigned the mirror without persisting
+    // re-anchored state. An anchored commit that is no longer part of
+    // origin's history proves a rewrite happened since this device last
+    // truly synced — re-anchor regardless (review v0.1.19: without this,
+    // dry-run-then-pull classified with stale anchors, destructively).
+    if !re_anchor {
+        if let Some(anchor) = st.last_synced_commit.as_deref() {
+            if let Some(remote) = git.remote_head()? {
+                if anchor != remote && !git.is_ancestor(anchor, &remote).unwrap_or(false) {
+                    println!("remote history was rewritten (gc --squash / rekey) — re-anchoring");
+                    re_anchor = true;
+                }
+            }
+        }
+    }
+
     if re_anchor {
         // History was force-rewritten. Drop every anchor the fresh manifest
         // does not corroborate: if this device's push lost a race against the

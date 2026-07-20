@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.19-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.20-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
