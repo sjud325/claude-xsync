@@ -64,7 +64,7 @@ Grab a binary from [Releases](https://github.com/sjud325/claude-xsync/releases)
 from source:
 
 ```bash
-cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.16-alpha claude-xsync
+cargo install --git https://github.com/sjud325/claude-xsync --tag v0.1.17-alpha claude-xsync
 ```
 
 (Pin the newest tag from the [Releases](https://github.com/sjud325/claude-xsync/releases)
@@ -98,7 +98,12 @@ session list by itself (details under `app-index` below).
 
 Give every machine a unique `--device` name: two machines under the same
 name silently disable the pull-before-push guard. `init` warns if the name
-is already taken on this remote (re-`init` of the same machine is fine).
+is already taken on this remote (best-effort — only devices that have
+pushed at least once are known; re-`init` of the same machine is fine).
+
+When a release changes *what* is synced (its notes will say so), upgrade
+every machine promptly: a mixed-version fleet can ping-pong newly
+machine-local files back and forth until all machines run the same version.
 
 `init` on the first device also adds a **multi-device note** to your synced
 `~/.claude/CLAUDE.md` (marker-delimited managed block) so that sessions

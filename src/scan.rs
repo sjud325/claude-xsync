@@ -96,6 +96,34 @@ pub fn is_conflict_copy(name: &str) -> bool {
     name.contains(".xsync-conflict.")
 }
 
+/// Machine-local by construction — no config can make these sync.
+/// Works on rel and portable paths alike (only inspects mapper-independent
+/// components: conflict-copy names and the plugins root).
+pub fn is_never_synced_rel(rel: &str) -> bool {
+    rel.split('/').any(is_conflict_copy)
+        || rel
+            .strip_prefix("plugins/")
+            .is_some_and(|rest| rest.starts_with('.'))
+}
+
+/// Is this path in THIS device's sync set? The single source of truth shared
+/// by collection (push) and application (pull): a device must never receive
+/// remote content for a path it would not itself collect. Accepts rel or
+/// portable form (the top segment and plugins root are identical in both).
+/// The mcp synthetic portable is handled by its caller, not here.
+pub fn is_synced_rel(rel: &str, cfg: &Config) -> bool {
+    if is_never_synced_rel(rel) {
+        return false;
+    }
+    if let Some(rest) = rel.strip_prefix("plugins/") {
+        // only root-level manifest files sync; dirs are machine-built
+        return !rest.contains('/');
+    }
+    let top = rel.split('/').next().unwrap_or(rel);
+    let removed = cfg.removed_paths.iter().any(|r| r == top);
+    (ALLOWLIST.contains(&top) || cfg.extra_paths.iter().any(|e| e == top)) && !removed
+}
+
 fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, PathBuf)>) -> anyhow::Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
@@ -148,6 +176,25 @@ mod tests {
         let rels: Vec<&str> = r.files.iter().map(|(rel, _)| rel.as_str()).collect();
         assert_eq!(rels, vec!["projects/a/s.jsonl", "settings.json"]);
         assert_eq!(r.unknown, vec!["weird-new-dir".to_string()]);
+    }
+
+    #[test]
+    fn sync_set_predicates() {
+        assert!(is_never_synced_rel("plugins/.last_inuse_sweep"));
+        assert!(is_never_synced_rel("projects/a/s.jsonl.xsync-conflict.123"));
+        assert!(!is_never_synced_rel("plugins/config.json"));
+
+        let mut cfg = Config::default();
+        assert!(is_synced_rel("settings.json", &cfg));
+        assert!(is_synced_rel("projects/${HOME}-ws-app/s.jsonl", &cfg));
+        assert!(is_synced_rel("plugins/config.json", &cfg));
+        assert!(!is_synced_rel("plugins/.last_inuse_sweep", &cfg));
+        assert!(!is_synced_rel("plugins/cache/x.node", &cfg));
+        assert!(!is_synced_rel("daemon/marker.txt", &cfg));
+        cfg.extra_paths.push("daemon".into());
+        assert!(is_synced_rel("daemon/marker.txt", &cfg));
+        cfg.removed_paths.push("todos".into());
+        assert!(!is_synced_rel("todos/t.json", &cfg));
     }
 
     #[test]

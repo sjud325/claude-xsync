@@ -1357,3 +1357,110 @@ fn pull_prunes_old_backups_when_configured() {
         "second-newest must survive with keep = 2"
     );
 }
+
+#[test]
+fn pull_never_overwrites_paths_outside_this_devices_sync_set() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    // dev_a opts the (normally machine-local) daemon dir into its sync set
+    let a_cfg = env.dev_a.xsync().join("config.toml");
+    let cfg = fs::read_to_string(&a_cfg).unwrap();
+    fs::write(
+        &a_cfg,
+        cfg.replace("extra_paths = []", "extra_paths = [\"daemon\"]"),
+    )
+    .unwrap();
+    fs::create_dir_all(env.dev_a.claude().join("daemon")).unwrap();
+    fs::write(env.dev_a.claude().join("daemon/marker.txt"), b"from-a").unwrap();
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+
+    // dev_b did NOT opt in — daemon is machine-local there, and its own
+    // live marker must never be overwritten by the remote entry
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    fs::create_dir_all(env.dev_b.claude().join("daemon")).unwrap();
+    fs::write(env.dev_b.claude().join("daemon/marker.txt"), b"b-local").unwrap();
+
+    let (c, o) = run(&env.dev_b, &["pull", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("daemon/marker.txt"),
+        "dry-run must not plan writes outside this device's sync set: {o}"
+    );
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("daemon/marker.txt")).unwrap(),
+        b"b-local",
+        "machine-local file was overwritten by a remote entry: {o}"
+    );
+    // the rest of the pull still applies normally
+    assert!(
+        env.dev_b.claude().join("history.jsonl").exists(),
+        "synced files must still arrive: {o}"
+    );
+}
+
+#[test]
+fn remote_deletion_of_desynced_path_leaves_local_file_untouched() {
+    let env = TestEnv::new();
+    assert_eq!(env.init(&env.dev_a).0, 0);
+    let (c, o) = run(&env.dev_a, &["push"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(env.init(&env.dev_b).0, 0);
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+
+    // simulate a 0.1.13-era install: the sweep marker was once synced
+    // (anchored in state) but is machine-local since 0.1.16, and the peer's
+    // upgrade deleted it from the remote
+    fs::create_dir_all(env.dev_b.claude().join("plugins")).unwrap();
+    fs::write(
+        env.dev_b.claude().join("plugins/.last_inuse_sweep"),
+        b"my-live-stamp",
+    )
+    .unwrap();
+    let state_path = env.dev_b.xsync().join("state.json");
+    let state = fs::read_to_string(&state_path).unwrap();
+    assert!(
+        state.contains("\"files\": {"),
+        "state format drifted: {state}"
+    );
+    fs::write(
+        &state_path,
+        state.replace(
+            "\"files\": {",
+            "\"files\": {\n    \"plugins/.last_inuse_sweep\": \"00\",",
+        ),
+    )
+    .unwrap();
+
+    // dry-run must not claim it would remove a file it will not touch
+    let (c, o) = run(&env.dev_b, &["pull", "--dry-run"]);
+    assert_eq!(c, 0, "{o}");
+    assert!(
+        !o.contains("would remove plugins/.last_inuse_sweep"),
+        "dry-run promises a removal that never happens: {o}"
+    );
+    assert!(
+        o.contains("would forget sync state for plugins/.last_inuse_sweep"),
+        "missing honest dry-run line: {o}"
+    );
+
+    let (c, o) = run(&env.dev_b, &["pull"]);
+    assert_eq!(c, 0, "{o}");
+    assert_eq!(
+        fs::read(env.dev_b.claude().join("plugins/.last_inuse_sweep")).unwrap(),
+        b"my-live-stamp",
+        "machine-local marker must survive the remote deletion: {o}"
+    );
+    assert!(
+        o.contains("forgot sync state for plugins/.last_inuse_sweep"),
+        "missing honest apply line: {o}"
+    );
+    let state = fs::read_to_string(&state_path).unwrap();
+    assert!(
+        !state.contains(".last_inuse_sweep"),
+        "state entry must be dropped: {state}"
+    );
+}

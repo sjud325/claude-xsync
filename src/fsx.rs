@@ -37,8 +37,15 @@ pub fn backup_files(claude_dir: &Path, rels: &[String], stamp: &str) -> anyhow::
 }
 
 /// Delete all but the newest `keep` pull-backup dirs (`<claude>.backup.<ts>`,
-/// numeric-stamp sort). Only exact matches are touched. Returns pruned names.
-pub fn prune_backups(claude_dir: &Path, keep: usize) -> anyhow::Result<Vec<String>> {
+/// numeric-stamp sort). Only exact matches are touched. Dirs stamped after
+/// `now_stamp` are never candidates: a clock that once ran ahead must not
+/// make the backup this very pull just created the "oldest" one (review
+/// v0.1.16 finding B). Returns pruned names.
+pub fn prune_backups(
+    claude_dir: &Path,
+    keep: usize,
+    now_stamp: u64,
+) -> anyhow::Result<Vec<String>> {
     let name = claude_dir
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
@@ -60,6 +67,9 @@ pub fn prune_backups(claude_dir: &Path, keep: usize) -> anyhow::Result<Vec<Strin
         let Ok(ts) = stamp.parse::<u64>() else {
             continue;
         };
+        if ts > now_stamp {
+            continue; // future-stamped (clock skew) — leave alone
+        }
         stamped.push((ts, dir_name, entry.path()));
     }
     stamped.sort_by_key(|s| std::cmp::Reverse(s.0)); // newest first
@@ -145,7 +155,7 @@ mod tests {
         fs::create_dir_all(td.path().join(".claude.backupX")).unwrap();
         fs::write(td.path().join(".claude.backup.50"), b"a file, not a dir").unwrap();
 
-        let pruned = prune_backups(&claude, 2).unwrap();
+        let pruned = prune_backups(&claude, 2, 400).unwrap();
         assert_eq!(pruned, vec![".claude.backup.99".to_string()]);
         assert!(!td.path().join(".claude.backup.99").exists());
         assert!(td.path().join(".claude.backup.100").exists());
@@ -155,7 +165,30 @@ mod tests {
         assert!(td.path().join(".claude.backup.50").is_file());
 
         // under the limit → nothing to do
-        assert!(prune_backups(&claude, 2).unwrap().is_empty());
+        assert!(prune_backups(&claude, 2, 400).unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_backups_protects_current_and_future_stamps() {
+        let td = tempfile::tempdir().unwrap();
+        let claude = td.path().join(".claude");
+        fs::create_dir_all(&claude).unwrap();
+        // 300 is future-stamped garbage from a clock that once ran ahead;
+        // 200 is the backup the current pull (now = 200) just created
+        for stamp in ["100", "150", "200", "300"] {
+            fs::create_dir_all(td.path().join(format!(".claude.backup.{stamp}"))).unwrap();
+        }
+        let pruned = prune_backups(&claude, 2, 200).unwrap();
+        assert_eq!(pruned, vec![".claude.backup.100".to_string()]);
+        assert!(
+            td.path().join(".claude.backup.200").exists(),
+            "the just-created backup must never be the prune victim"
+        );
+        assert!(td.path().join(".claude.backup.150").exists());
+        assert!(
+            td.path().join(".claude.backup.300").exists(),
+            "future-stamped dirs are left alone"
+        );
     }
 
     #[test]

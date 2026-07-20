@@ -137,6 +137,13 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 });
             }
             (local, state_h, Some(e)) => {
+                // A remote entry for a path outside THIS device's sync set
+                // (machine-local marker, un-opted extra_paths dir, …) is
+                // never applied — receiving it would overwrite live machine
+                // state (review v0.1.16 finding C).
+                if portable != MCP_PORTABLE && !crate::scan::is_synced_rel(&portable, &cfg) {
+                    continue;
+                }
                 let local_h = local.map(|l| l.portable_hash.clone());
                 let local_changed = local_h.as_deref() != state_h.as_deref();
                 let remote_changed = Some(e.plaintext_hash.as_str()) != state_h.as_deref();
@@ -255,12 +262,15 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                     summary.synced += 1;
                     println!("would merge mcpServers into ~/.claude.json")
                 }
-                Planned::Delete { rel, portable } => {
-                    println!(
-                        "would remove {} (deleted on remote)",
-                        rel.as_deref().unwrap_or(portable)
-                    )
-                }
+                Planned::Delete { rel, portable } => match rel {
+                    Some(rel) => println!("would remove {rel} (deleted on remote)"),
+                    // no local rel — the path is no longer collected on this
+                    // device, so only the sync anchor goes (review finding A:
+                    // never promise a removal that will not happen)
+                    None => println!(
+                        "would forget sync state for {portable} (deleted on remote; nothing removed locally)"
+                    ),
+                },
                 Planned::StateOnly { portable, .. } => println!("already in sync: {portable}"),
                 Planned::TouchMtime { .. } => {}
             }
@@ -277,7 +287,8 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     }
 
     // ---- apply (backup → atomic writes → state per file) ----
-    let stamp = unix_now().to_string();
+    let now = unix_now();
+    let stamp = now.to_string();
     let backup_rels: Vec<String> = planned
         .iter()
         .filter_map(|p| match p {
@@ -328,12 +339,17 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
                 summary.synced += 1;
             }
             Planned::Delete { rel, portable } => {
-                if let Some(rel) = rel {
-                    let path = claude_dir.join(&rel);
-                    if path.is_file() {
-                        std::fs::remove_file(&path)?; // already copied into the backup dir
-                        println!("removed {rel} (deleted on remote; backup kept)");
+                match &rel {
+                    Some(rel) => {
+                        let path = claude_dir.join(rel);
+                        if path.is_file() {
+                            std::fs::remove_file(&path)?; // already copied into the backup dir
+                            println!("removed {rel} (deleted on remote; backup kept)");
+                        }
                     }
+                    None => println!(
+                        "forgot sync state for {portable} (deleted on remote; nothing removed locally)"
+                    ),
                 }
                 st.files.remove(&portable);
                 state::save_state(&st)?;
@@ -364,7 +380,7 @@ pub fn run_pull(opts: PullOpts) -> anyhow::Result<i32> {
     // machine-local housekeeping — never touches synced data, never fails
     // the pull
     if cfg.backup_keep > 0 {
-        match crate::fsx::prune_backups(&claude_dir, cfg.backup_keep as usize) {
+        match crate::fsx::prune_backups(&claude_dir, cfg.backup_keep as usize, now) {
             Ok(pruned) if !pruned.is_empty() => println!(
                 "pruned {} old pull backups (kept the {} newest)",
                 pruned.len(),
